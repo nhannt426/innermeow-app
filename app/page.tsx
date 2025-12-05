@@ -1,22 +1,41 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import WebApp from '@twa-dev/sdk';
+
+// Định nghĩa kiểu dữ liệu cho User (để TypeScript không báo lỗi)
+interface UserData {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  language_code?: string;
+  is_premium?: boolean;
+}
 
 export default function Home() {
-  const [userData, setUserData] = useState<any>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
 
   useEffect(() => {
-    // Check if running inside Telegram
-    // We use a try-catch to prevent crashing in standard browsers
-    try {
-        if (typeof window !== 'undefined' && WebApp.initDataUnsafe.user) {
-            setUserData(WebApp.initDataUnsafe.user);
-            WebApp.expand(); // Auto expand to full screen
+    // Hàm này chỉ chạy dưới Client (Trình duyệt) nên an toàn
+    const initWebApp = async () => {
+      if (typeof window !== 'undefined') {
+        try {
+          // IMPORT ĐỘNG: Chỉ load SDK khi đã ở browser
+          const WebApp = (await import('@twa-dev/sdk')).default;
+          
+          WebApp.ready(); // Báo cho Telegram biết app đã sẵn sàng
+          WebApp.expand(); // Mở rộng full màn hình
+          
+          if (WebApp.initDataUnsafe.user) {
+            setUserData(WebApp.initDataUnsafe.user as UserData);
+          }
+        } catch (e) {
+          console.log("Error loading Telegram SDK:", e);
         }
-    } catch (e) {
-        console.log("Not in Telegram environment");
-    }
+      }
+    };
+
+    initWebApp();
   }, []);
 
   return (
@@ -35,16 +54,17 @@ export default function Home() {
             <div className="space-y-2 animate-pulse">
               <p className="text-emerald-400 text-sm font-semibold tracking-wider">● TELEGRAM CONNECTED</p>
               <p className="text-xl">Welcome, <span className="font-bold text-white">{userData.first_name}</span></p>
+              {userData.username && <p className="text-xs text-slate-500">@{userData.username}</p>}
             </div>
           ) : (
             <div className="space-y-2">
-               <p className="text-amber-400 text-sm font-semibold tracking-wider">● BROWSER MODE</p>
+               <p className="text-amber-400 text-sm font-semibold tracking-wider">● LOADING / BROWSER MODE</p>
                <p className="text-slate-300">Open this link in Telegram to play.</p>
             </div>
           )}
         </div>
 
-        <p className="text-xs text-slate-600">v1.0.0 - Initializing...</p>
+        <p className="text-xs text-slate-600">v1.0.1 - Fixed Build Error</p>
       </div>
     </div>
   );
