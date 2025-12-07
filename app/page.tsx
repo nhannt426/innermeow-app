@@ -170,15 +170,23 @@ export default function Home() {
 
           // Logic mới: Giới hạn % chặt hơn để tránh mép
           // Lưu ý: CSS đã có translate(-50%, -50%) nên ta tính tâm
-          if (side === 0) { // Trên (Tránh 2 góc bo tròn của điện thoại)
-             spawnX = 20 + Math.random() * 60; // 20% -> 80% chiều ngang
-             spawnY = 12 + Math.random() * 5;  // 12% -> 17% chiều dọc
-          } else if (side === 1) { // Trái
-             spawnX = 10 + Math.random() * 5;  // 10% -> 15%
-             spawnY = 25 + Math.random() * 40; // 25% -> 65%
-          } else { // Phải
-             spawnX = 85 + Math.random() * 5;  // 85% -> 90%
-             spawnY = 25 + Math.random() * 40; // 25% -> 65%
+          if (side === 0) { // CẠNH TRÊN (Top)
+             // X: Từ 20% đến 80% (Tránh 2 góc bo tròn tai thỏ)
+             spawnX = 20 + Math.random() * 60; 
+             // Y: Từ 15% đến 25% (Tránh đè lên Header Coins)
+             spawnY = 15 + Math.random() * 10; 
+          } 
+          else if (side === 1) { // CẠNH TRÁI (Left)
+             // X: Từ 15% đến 25% (Thụt vào sâu hơn hẳn)
+             spawnX = 15 + Math.random() * 10;  
+             // Y: Từ 30% đến 60% (Khoảng giữa thân máy, tránh Header và Footer)
+             spawnY = 30 + Math.random() * 30; 
+          } 
+          else { // CẠNH PHẢI (Right)
+             // X: Từ 75% đến 85% (Thụt vào sâu hơn hẳn)
+             spawnX = 75 + Math.random() * 10; 
+             // Y: Từ 30% đến 60%
+             spawnY = 30 + Math.random() * 30; 
           }
 
           const newBubble = { id: now, x: spawnX, y: spawnY };
