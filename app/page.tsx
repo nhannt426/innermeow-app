@@ -11,7 +11,7 @@ import { Loader2, Settings } from 'lucide-react';
 
 const MAX_HAPPINESS = 10;
 const BUBBLE_GEN_RATE_MS = 5000; 
-const SLEEP_DURATION_MS = 60000;
+const SLEEP_DURATION_MS = 4 * 60 * 60 * 1000;
 
 interface UserData {
   id: string;
@@ -79,18 +79,24 @@ export default function Home() {
       if (sleepUntil) {
         const diff = sleepUntil - now;
         if (diff <= 0) {
-          setSleepUntil(null); // Tỉnh dậy
+          setSleepUntil(null);
           setTimeRemaining("");
           webAppRef.current?.HapticFeedback.notificationOccurred('success');
         } else {
-          // Format MM:SS
-          const m = Math.floor(diff / 60000);
-          const s = Math.floor((diff % 60000) / 1000);
-          setTimeRemaining(`${m}:${s < 10 ? '0' : ''}${s}`);
+          // FIX 3: Format hiển thị giờ:phút:giây (HH:MM:SS) cho thời gian dài
+          const hours = Math.floor(diff / (1000 * 60 * 60));
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+          
+          const hStr = hours > 0 ? `${hours}:` : '';
+          const mStr = minutes < 10 ? `0${minutes}` : minutes;
+          const sStr = seconds < 10 ? `0${seconds}` : seconds;
+          
+          setTimeRemaining(`${hStr}${mStr}:${sStr}`);
         }
       }
 
-      // 2. Logic Spawn Bong Bóng (FIX 1: Safe Zone Padding)
+      // 2. Logic Spawn Bong Bóng (FIX 2: Safe Zone chuẩn xác hơn)
       if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
         setBubbles(prev => {
           if (prev.length >= maxBubbles || isSleeping) return prev; 
@@ -98,16 +104,17 @@ export default function Home() {
           const side = Math.floor(Math.random() * 3);
           let spawnX, spawnY;
 
-          // Padding 15% để không sát mép
-          if (side === 0) { // Trên
-             spawnX = 15 + Math.random() * 70; // 15% -> 85%
-             spawnY = 15 + Math.random() * 10; // 15% -> 25%
+          // Logic mới: Giới hạn % chặt hơn để tránh mép
+          // Lưu ý: CSS đã có translate(-50%, -50%) nên ta tính tâm
+          if (side === 0) { // Trên (Tránh 2 góc bo tròn của điện thoại)
+             spawnX = 20 + Math.random() * 60; // 20% -> 80% chiều ngang
+             spawnY = 12 + Math.random() * 5;  // 12% -> 17% chiều dọc
           } else if (side === 1) { // Trái
-             spawnX = 5 + Math.random() * 10;  
-             spawnY = 25 + Math.random() * 40; 
+             spawnX = 10 + Math.random() * 5;  // 10% -> 15%
+             spawnY = 25 + Math.random() * 40; // 25% -> 65%
           } else { // Phải
-             spawnX = 80 + Math.random() * 10; 
-             spawnY = 25 + Math.random() * 40; 
+             spawnX = 85 + Math.random() * 5;  // 85% -> 90%
+             spawnY = 25 + Math.random() * 40; // 25% -> 65%
           }
 
           const newBubble = { id: now, x: spawnX, y: spawnY };
