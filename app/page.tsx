@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import ShopModal from '@/components/game/ShopModal';
-import { createClient } from '@/utils/supabase/client'; // Assuming you have a client helper
+import { supabase } from '@/utils/supabase/client';
 
 // Mock Telegram WebApp object for development in a browser
 const getWebApp = () => {
@@ -30,7 +30,6 @@ interface UserData {
 export default function GamePage() {
   const [isShopOpen, setShopOpen] = useState(false);
   const [userData, setUserData] = useState<UserData | null>(null);
-  const supabase = createClient();
   const webApp = getWebApp();
 
   // Fetch initial user data
