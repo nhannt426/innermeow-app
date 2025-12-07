@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Sparkles, X, Lock, ArrowUpCircle } from 'lucide-react';
+import { useGameSound } from '@/hooks/useGameSound';
 
 interface ShopModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface ShopModalProps {
 
 const calculateCost = (level: number) => Math.floor(100 * Math.pow(1.5, level));
 const MAX_LEVEL = 20;
+const { playUi } = useGameSound();
 
 export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLevel, onUpgrade }: ShopModalProps) {
   return (
@@ -44,6 +46,7 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
             <div className="space-y-4 pb-24 overflow-y-auto h-full">
               {/* Item 1: Better Gifts (Thay cho Click Power) */}
               <UpgradeItem 
+                onClick={() => playUi()}
                 id="click"
                 name="Better Gifts"
                 desc="Get more shards when cat is happy"
@@ -57,6 +60,7 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
               
               {/* Item 2: More Bubbles (Thay cho Energy) */}
               <UpgradeItem 
+                onClick={() => playUi()}
                 id="energy"
                 name="Dream Bubbles"
                 desc="Bubbles appear more often"

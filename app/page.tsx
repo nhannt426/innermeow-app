@@ -8,7 +8,7 @@ import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
 import AssetPreloader from '@/components/ui/AssetPreloader';
-import { Loader2, Settings } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import useSound from 'use-sound'; // Import trực tiếp cho BGM
 import { useGameSound } from '@/hooks/useGameSound'; // Import hook cho SFX
 
@@ -318,8 +318,23 @@ export default function Home() {
                 </div>
             </div>
          </div>
-         <button className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto hover:bg-white/10">
-            <Settings size={22} className="text-white/80" />
+         <button 
+            onClick={() => playUi()} 
+            // Xóa background đen mờ cũ đi, chỉ giữ lại hiệu ứng active scale
+            className="relative w-12 h-12 flex items-center justify-center active:scale-90 transition-transform group"
+         >
+            {/* Hiệu ứng Glow nhẹ phía sau khi hover */}
+            <div className="absolute inset-0 bg-white/20 rounded-full blur-md opacity-0 group-hover:opacity-100 transition-opacity" />
+            
+            {/* Ảnh 3D */}
+            <div className="relative w-9 h-9 drop-shadow-md group-hover:scale-110 transition-transform duration-300 ease-spring">
+                 <Image 
+                    src="/assets/icons/settings-3d.png" 
+                    alt="Settings" 
+                    fill 
+                    className="object-contain"
+                 />
+            </div>
          </button>
       </header>
 

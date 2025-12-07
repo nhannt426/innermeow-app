@@ -22,6 +22,8 @@ export default function AssetPreloader() {
       <img src="/assets/icons/star-3d.webp" alt="preload" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/assets/icons/heart-3d.webp" alt="preload" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/assets/icons/settings-3d.webp" alt="preload" />
     </div>
   );
 }
