@@ -11,14 +11,14 @@ export interface GameItem {
 
 export const GAME_ITEMS: GameItem[] = [
   // --- LEVEL 1 (BASIC) ---
-  { id: 'food-1', name: 'Fish Cookie', type: 'food', src: '/assets/items/item-food-1.png', minLevel: 1, reward: 15 },
-  { id: 'toy-1', name: 'Wool Ball', type: 'toy', src: '/assets/items/item-toy-1.png', minLevel: 1, reward: 20 },
-  { id: 'brush-1', name: 'Basic Brush', type: 'groom', src: '/assets/items/item-brush-1.png', minLevel: 1, reward: 25 },
+  { id: 'food-1', name: 'Fish Cookie', type: 'food', src: '/assets/items/item-food-1.webp', minLevel: 1, reward: 15 },
+  { id: 'toy-1', name: 'Wool Ball', type: 'toy', src: '/assets/items/item-toy-1.webp', minLevel: 1, reward: 20 },
+  { id: 'brush-1', name: 'Basic Brush', type: 'groom', src: '/assets/items/item-brush-1.webp', minLevel: 1, reward: 25 },
 
   // --- LEVEL 5 (ADVANCED) - Sau này bạn chỉnh minLevel lên 5
-  { id: 'food-2', name: 'Salmon Sushi', type: 'food', src: '/assets/items/item-food-2.png', minLevel: 1, reward: 40 }, 
-  { id: 'toy-2', name: 'Feather Wand', type: 'toy', src: '/assets/items/item-toy-2.png', minLevel: 1, reward: 50 },
-  { id: 'brush-2', name: 'Red Bowtie', type: 'groom', src: '/assets/items/item-brush-2.png', minLevel: 1, reward: 60 },
+  { id: 'food-2', name: 'Salmon Sushi', type: 'food', src: '/assets/items/item-food-2.webp', minLevel: 1, reward: 40 }, 
+  { id: 'toy-2', name: 'Feather Wand', type: 'toy', src: '/assets/items/item-toy-2.webp', minLevel: 1, reward: 50 },
+  { id: 'brush-2', name: 'Red Bowtie', type: 'groom', src: '/assets/items/item-brush-2.webp', minLevel: 1, reward: 60 },
 ];
 
 // Hàm random item dựa trên level hiện tại của User

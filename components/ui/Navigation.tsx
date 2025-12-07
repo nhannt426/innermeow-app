@@ -5,10 +5,10 @@ import clsx from 'clsx';
 
 // Định nghĩa đường dẫn ảnh
 const tabs = [
-  { id: 'home', img: '/assets/icons/home-3d.png', label: 'Home' },
-  { id: 'shop', img: '/assets/icons/shop-3d.png', label: 'Shop' },
-  { id: 'travel', img: '/assets/icons/travel-3d.png', label: 'Travel' },
-  { id: 'profile', img: '/assets/icons/profile-3d.png', label: 'Me' },
+  { id: 'home', img: '/assets/icons/home-3d.webp', label: 'Home' },
+  { id: 'shop', img: '/assets/icons/shop-3d.webp', label: 'Shop' },
+  { id: 'travel', img: '/assets/icons/travel-3d.webp', label: 'Travel' },
+  { id: 'profile', img: '/assets/icons/profile-3d.webp', label: 'Me' },
 ];
 
 export default function Navigation({ activeTab, onTabChange }: { activeTab: string, onTabChange: (id: string) => void }) {

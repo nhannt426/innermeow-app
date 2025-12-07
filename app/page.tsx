@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/utils/supabase/client';
 import RoomScene from '@/components/game/RoomScene';
@@ -9,18 +9,18 @@ import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
 import { Loader2, Settings } from 'lucide-react';
 
-// --- CẤU HÌNH GAME ---
-const MAX_HAPPINESS = 10; // Thanh vui vẻ
-const BUBBLE_GEN_RATE_MS = 5000; // Tạm để 5 giây sinh 1 bóng để bạn test (Thực tế nên để 30 phút)
-const SLEEP_DURATION_MS = 60000; // Mèo ngủ 1 phút sau khi đầy Happiness
+const MAX_HAPPINESS = 10;
+const BUBBLE_GEN_RATE_MS = 5000; 
+const SLEEP_DURATION_MS = 60000;
 
 interface UserData {
   id: string;
   telegram_id: number;
   first_name: string;
   coins: number;
-  click_level: number;  // Dùng làm Level vật phẩm (Item Rarity)
-  energy_level: number; // Dùng làm Sức chứa bong bóng (Max Bubbles)
+  click_level: number;
+  energy_level: number;
+  // Các trường lưu DB khác nếu cần
 }
 
 export default function Home() {
@@ -28,84 +28,90 @@ export default function Home() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // --- GAME STATES ---
+  // --- GAME STATES (Local Source of Truth) ---
   const [coins, setCoins] = useState(0);
   const [happiness, setHappiness] = useState(0);
   
   // Sleep Logic
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState(""); // FIX 2: String đếm ngược
+  
   const isSleeping = sleepUntil ? Date.now() < sleepUntil : false;
 
-  // Bubble Logic (Lưu trữ danh sách bong bóng đang bay)
   const [bubbles, setBubbles] = useState<{id: number, x: number, y: number}[]>([]);
   const lastBubbleTimeRef = useRef<number>(Date.now());
-
-  // UI Effects
   const [clicks, setClicks] = useState<any[]>([]);
   const [isShopOpen, setIsShopOpen] = useState(false);
   const webAppRef = useRef<any>(null);
+  
+  // Ref để lưu state tiền chờ sync (tránh mất tiền khi navigation)
+  const unsavedCoinsRef = useRef(0);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Tính Max Bubble dựa trên Level (Level 1 = 3 bóng, mỗi cấp thêm 1)
   const maxBubbles = userData ? 2 + userData.energy_level : 3;
 
-  // --- KHỞI TẠO ---
+  // --- INIT (Chỉ chạy 1 lần duy nhất) ---
   useEffect(() => {
     const init = async () => {
-      try {
-        if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
+        try {
           const WebApp = (await import('@twa-dev/sdk')).default;
           webAppRef.current = WebApp;
           if (WebApp.initDataUnsafe.user) {
-            WebApp.ready(); 
-            WebApp.expand(); 
-            WebApp.setHeaderColor('#1a1b26');
-            fetchData(WebApp.initDataUnsafe.user.id);
+            WebApp.ready(); WebApp.expand(); WebApp.setHeaderColor('#1a1b26');
+            // Fetch data lần đầu tiên
+            await fetchData(WebApp.initDataUnsafe.user.id);
           } else {
-            console.log("Browser mode detected");
             setLoading(false);
           }
-        }
-      } catch (e) { 
-        console.error(e);
-        setLoading(false); 
+        } catch (e) { setLoading(false); }
       }
     };
     init();
+  }, []);
 
-    // --- GAME LOOP (Chạy mỗi 1 giây) ---
+  // --- GAME LOOP & TIMER ---
+  useEffect(() => {
     const gameLoop = setInterval(() => {
       const now = Date.now();
       
-      // 1. Kiểm tra Mèo dậy chưa
-      if (sleepUntil && now >= sleepUntil) {
-        setSleepUntil(null); // Tỉnh dậy
-        webAppRef.current?.HapticFeedback.notificationOccurred('success');
+      // 1. Logic Đếm ngược & Tỉnh dậy
+      if (sleepUntil) {
+        const diff = sleepUntil - now;
+        if (diff <= 0) {
+          setSleepUntil(null); // Tỉnh dậy
+          setTimeRemaining("");
+          webAppRef.current?.HapticFeedback.notificationOccurred('success');
+        } else {
+          // Format MM:SS
+          const m = Math.floor(diff / 60000);
+          const s = Math.floor((diff % 60000) / 1000);
+          setTimeRemaining(`${m}:${s < 10 ? '0' : ''}${s}`);
+        }
       }
 
-      // 2. Logic Sinh Bong Bóng (Spawn)
+      // 2. Logic Spawn Bong Bóng (FIX 1: Safe Zone Padding)
       if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
         setBubbles(prev => {
-          // Nếu đầy kho hoặc Mèo đang ngủ thì không sinh thêm (để tránh rối)
           if (prev.length >= maxBubbles || isSleeping) return prev; 
           
-          // --- LOGIC SPAWN RÌA MÀN HÌNH (Quan trọng) ---
-          // Random chọn 1 trong 3 cạnh: 0=Trên, 1=Trái, 2=Phải
           const side = Math.floor(Math.random() * 3);
           let spawnX, spawnY;
 
-          if (side === 0) { // Cạnh Trên (Tránh che đầu mèo)
-             spawnX = 10 + Math.random() * 80; // 10% -> 90% chiều ngang
-             spawnY = 10 + Math.random() * 10; // 10% -> 20% chiều dọc (Sát mép trên)
-          } else if (side === 1) { // Cạnh Trái
-             spawnX = 5 + Math.random() * 10;  // 5% -> 15% chiều ngang (Sát mép trái)
-             spawnY = 20 + Math.random() * 50; // 20% -> 70% chiều dọc
-          } else { // Cạnh Phải
-             spawnX = 85 + Math.random() * 10; // 85% -> 95% chiều ngang (Sát mép phải)
-             spawnY = 20 + Math.random() * 50; // 20% -> 70% chiều dọc
+          // Padding 15% để không sát mép
+          if (side === 0) { // Trên
+             spawnX = 15 + Math.random() * 70; // 15% -> 85%
+             spawnY = 15 + Math.random() * 10; // 15% -> 25%
+          } else if (side === 1) { // Trái
+             spawnX = 5 + Math.random() * 10;  
+             spawnY = 25 + Math.random() * 40; 
+          } else { // Phải
+             spawnX = 80 + Math.random() * 10; 
+             spawnY = 25 + Math.random() * 40; 
           }
 
           const newBubble = { id: now, x: spawnX, y: spawnY };
-          lastBubbleTimeRef.current = now; // Reset timer
+          lastBubbleTimeRef.current = now;
           return [...prev, newBubble];
         });
       }
@@ -118,63 +124,69 @@ export default function Home() {
     const { data } = await supabase.from('users').select('*').eq('telegram_id', tid).single();
     if (data) {
       setUserData(data);
-      setCoins(data.coins);
+      setCoins(data.coins); // FIX 4: Chỉ set coins lần đầu load app
+      // Cần logic load happiness/sleep từ DB nếu muốn persist (Tạm thời để local session)
     }
     setLoading(false);
   };
 
-  // --- PLAYER ACTIONS ---
+  // --- SYNC TO DB (Debounce) ---
+  const triggerSync = (amountToAdd: number) => {
+    unsavedCoinsRef.current += amountToAdd;
+    
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    
+    syncTimeoutRef.current = setTimeout(async () => {
+        if (userData && unsavedCoinsRef.current > 0) {
+            const val = unsavedCoinsRef.current;
+            unsavedCoinsRef.current = 0;
+            // Gọi RPC ngầm
+            await supabase.rpc('increment_coins', { row_id: userData.id, amount: val });
+            console.log('Synced:', val);
+        }
+    }, 2000);
+  };
 
-  // 1. Xử lý khi Bong bóng bị chọc vỡ (Gọi từ RoomScene)
+  // --- ACTIONS ---
+
   const handlePopBubble = (id: number) => {
     setBubbles(prev => prev.filter(b => b.id !== id));
     webAppRef.current?.HapticFeedback.impactOccurred('light');
-    // Lưu ý: Không cộng tiền ở đây nữa, tiền sẽ có khi cho mèo ăn item rớt ra
   };
 
-  // 2. Xử lý khi Tương tác thành công (Mèo ăn/chơi xong)
   const handleInteractSuccess = (reward: number, type: string) => {
     if (isSleeping) return;
 
-    // Hiệu ứng Visual
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
-    
-    // Tạo tim bay giữa màn hình
     setClicks(prev => [...prev, { id: Date.now(), x: window.innerWidth/2, y: window.innerHeight/2 }]);
 
-    // Cộng tiền
+    // FIX 4: Cộng tiền Optimistic (Cục bộ)
     setCoins(prev => prev + reward);
+    triggerSync(reward); // Lưu ngầm
     
-    // Tăng Happiness (Item càng xịn tăng càng nhiều?)
-    // Tạm thời cố định +1 hoặc +2
+    // FIX 3: Happiness giữ nguyên trong State (Không bị reset vì state nằm ở Home)
     if (happiness < MAX_HAPPINESS) {
       setHappiness(prev => Math.min(prev + 1, MAX_HAPPINESS));
     } 
     
-    // Check nếu đầy Happiness -> Nhận quà to & Đi ngủ
     if (happiness + 1 >= MAX_HAPPINESS) {
       handleClaimBigGift();
     }
   };
 
-  // 3. Nhận quà to khi đầy Happiness
   const handleClaimBigGift = () => {
     const levelBonus = (userData?.click_level || 1) * 50;
     const bigReward = 200 + levelBonus;
     
     setCoins(prev => prev + bigReward);
-    setHappiness(0);
-    setSleepUntil(Date.now() + SLEEP_DURATION_MS); // Ngủ 1 phút
-    
-    // Gọi Supabase update (bạn tự tích hợp RPC sau)
-    if(userData) {
-        // supabase.rpc(...)
-    }
+    triggerSync(bigReward);
 
+    setHappiness(0);
+    setSleepUntil(Date.now() + SLEEP_DURATION_MS);
+    
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
   };
 
-  // 4. Mua hàng trong Shop
   const handleUpgrade = async (type: 'click' | 'energy', cost: number) => {
      if(coins >= cost) {
          setCoins(prev => prev - cost);
@@ -187,13 +199,14 @@ export default function Home() {
              }
          });
          webAppRef.current?.HapticFeedback.notificationOccurred('success');
-         // Gọi RPC thật ở đây
+         // Với logic mua, nên gọi RPC ngay lập tức để trừ tiền chuẩn
+         await supabase.rpc('buy_upgrade', { p_user_id: userData?.id, p_type: type });
      } else {
          webAppRef.current?.HapticFeedback.notificationOccurred('error');
      }
   };
 
-  // 5. Chuyển Tab
+  // FIX 3: Chuyển Tab không ảnh hưởng Happiness/Coins (Vì state nằm ở Home cha)
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (tab === 'shop') setIsShopOpen(true);
@@ -204,13 +217,12 @@ export default function Home() {
     <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
       <ClickEffects clicks={clicks} />
 
-      {/* --- HEADER --- */}
+      {/* HEADER */}
       <header className="absolute top-0 w-full p-6 flex justify-between z-40 pointer-events-none">
          <div className="flex flex-col gap-1 pointer-events-auto">
             <div className="relative pl-12 pr-6 py-3 bg-black/30 backdrop-blur-xl rounded-full border border-white/10 shadow-lg">
-                {/* 3D STAR ICON */}
                 <div className="absolute -left-2 -top-2 w-16 h-16 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-float">
-                    <Image src="/assets/icons/star-3d.png" alt="Star" fill className="object-contain" />
+                    <Image src="/assets/icons/star-3d.webp" alt="Star" fill className="object-contain" />
                 </div>
                 <div className="flex flex-col items-start justify-center leading-none">
                     <span className="text-[10px] text-yellow-200/80 font-bold uppercase tracking-widest mb-1">Stars</span>
@@ -218,39 +230,39 @@ export default function Home() {
                 </div>
             </div>
          </div>
-         <button className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto hover:bg-white/10 active:scale-95 transition-all">
+         <button className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto hover:bg-white/10">
             <Settings size={22} className="text-white/80" />
          </button>
       </header>
 
-      {/* --- MAIN SCENE --- */}
+      {/* MAIN SCENE */}
       <main className="relative z-10 w-full h-screen pt-10">
         {activeTab === 'home' && (
            <RoomScene 
-             userLevel={userData?.click_level || 1} // Truyền Level để random vật phẩm
-             bubbles={bubbles} // Danh sách bong bóng
-             onPopBubble={handlePopBubble} // Hàm xóa bong bóng
-             onInteractSuccess={handleInteractSuccess} // Hàm nhận thưởng khi mèo ăn
+             userLevel={userData?.click_level || 1}
+             bubbles={bubbles}
+             onPopBubble={handlePopBubble}
+             onInteractSuccess={handleInteractSuccess}
            />
         )}
+        {/* Placeholder cho các tab khác */}
+        {activeTab === 'travel' && <div className="flex items-center justify-center h-full text-white/50">Travel Coming Soon</div>}
+        {activeTab === 'profile' && <div className="flex items-center justify-center h-full text-white/50">Profile Coming Soon</div>}
       </main>
 
-      {/* --- HAPPINESS BAR --- */}
+      {/* HAPPINESS BAR (Có Timer) */}
       <div className="fixed bottom-28 left-6 right-6 z-30 pointer-events-none flex justify-center">
-        <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: isSleeping ? 0.6 : 1 }}>
+        <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: isSleeping ? 1 : 1 }}>
             
-            {/* 3D HEART ICON */}
             <div className="absolute -left-1 -top-4 w-14 h-14 z-20 drop-shadow-[0_4px_8px_rgba(244,114,182,0.5)]">
-                 <Image src="/assets/icons/heart-3d.png" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale' : ''}`} />
+                 <Image src="/assets/icons/heart-3d.webp" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
             </div>
 
-            {/* BAR */}
             <div className="w-full h-8 bg-[#12131c]/80 rounded-full border border-white/10 backdrop-blur-md overflow-hidden p-1 shadow-xl pl-12 relative">
-                {/* Text chỉ số */}
-                <div className="absolute inset-0 flex items-center justify-center z-10 text-xs font-bold text-white/90 drop-shadow-sm">
-                    {isSleeping ? 'Sleeping (Zzz)...' : `${happiness} / ${MAX_HAPPINESS} Happiness`}
+                {/* FIX 2: Hiển thị Timer */}
+                <div className="absolute inset-0 flex items-center justify-center z-10 text-xs font-bold text-white/90 drop-shadow-sm font-mono tracking-wider">
+                    {isSleeping ? `Zzz... ${timeRemaining}` : `${happiness} / ${MAX_HAPPINESS} Happiness`}
                 </div>
-                {/* Thanh tiến trình */}
                 <div 
                     className={`h-full rounded-full transition-all duration-500 ease-out ${isSleeping ? 'bg-slate-600' : 'bg-gradient-to-r from-pink-500 via-rose-400 to-pink-300 shadow-[0_0_20px_rgba(244,114,182,0.6)]'}`}
                     style={{ width: isSleeping ? '100%' : `${(happiness / MAX_HAPPINESS) * 100}%` }}
@@ -259,28 +271,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* --- MODALS & NAV --- */}
-      <ShopModal 
-        isOpen={isShopOpen} 
-        onClose={() => { setIsShopOpen(false); setActiveTab('home'); }} 
-        coins={coins} 
-        clickLevel={userData?.click_level || 1} 
-        energyLevel={userData?.energy_level || 1} 
-        onUpgrade={handleUpgrade} 
-      />
+      <ShopModal isOpen={isShopOpen} onClose={() => { setIsShopOpen(false); setActiveTab('home'); }} coins={coins} clickLevel={userData?.click_level || 1} energyLevel={userData?.energy_level || 1} onUpgrade={handleUpgrade} />
       
-      <Navigation 
-        activeTab={activeTab} 
-        onTabChange={(tab) => { setActiveTab(tab); if(tab==='shop') setIsShopOpen(true); else setIsShopOpen(false); }} 
-      />
+      <Navigation activeTab={activeTab} onTabChange={(tab) => { setActiveTab(tab); if(tab==='shop') setIsShopOpen(true); else setIsShopOpen(false); }} />
 
-      {/* Loading Screen */}
-      {loading && (
-        <div className="fixed inset-0 bg-game-bg z-[100] flex items-center justify-center flex-col gap-4">
-            <Loader2 className="w-10 h-10 animate-spin text-game-primary"/>
-            <p className="text-sm text-white/50 tracking-widest font-bold">LOADING SANCTUARY...</p>
-        </div>
-      )}
+      {loading && <div className="fixed inset-0 bg-game-bg z-[100] flex items-center justify-center"><Loader2 className="animate-spin text-game-primary"/></div>}
     </div>
   );
 }
