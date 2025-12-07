@@ -5,14 +5,12 @@ import { supabase } from '@/utils/supabase/client';
 import RoomScene from '@/components/game/RoomScene';
 import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
-import { Loader2, Zap } from 'lucide-react'; // Thêm icon Zap (Năng lượng)
+import { Loader2, Zap, Gem } from 'lucide-react'; // Dùng icon Gem cho Coin nhìn sang hơn
 
-// --- CẤU HÌNH GAME ---
-const MAX_ENERGY = 1000;
-const ENERGY_REGEN_RATE = 1; // Hồi 1 năng lượng mỗi giây (Logic này làm sau, tạm thời để hiển thị)
+const MAX_ENERGY = 500; // Giả sử max là 500
 
 interface UserData {
-  id: string; // Đổi sang string vì Supabase UUID là string
+  id: string;
   telegram_id: number;
   first_name: string;
   coins: number;
@@ -24,34 +22,32 @@ export default function Home() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // State UI
-  const [energy, setEnergy] = useState(MAX_ENERGY);
+  // State Optimistic (Hiển thị ngay cho mượt)
+  const [localCoins, setLocalCoins] = useState(0);
+  const [localEnergy, setLocalEnergy] = useState(0);
+  
   const [clicks, setClicks] = useState<{id: number, x: number, y: number, value: number}[]>([]);
   
-  // Refs
-  const unsavedCoinsRef = useRef(0);
+  // Refs sync
+  const pendingUpdatesRef = useRef({ coins: 0, energy: 0 });
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const webAppRef = useRef<any>(null); // Lưu ref WebApp để gọi Haptic
+  const webAppRef = useRef<any>(null);
 
-  // --- INIT ---
   useEffect(() => {
     const initApp = async () => {
       if (typeof window !== 'undefined') {
         try {
           const WebApp = (await import('@twa-dev/sdk')).default;
-          webAppRef.current = WebApp; // Lưu lại dùng sau
-          
+          webAppRef.current = WebApp;
           if (WebApp.initDataUnsafe.user) {
             WebApp.ready();
             WebApp.expand();
-            WebApp.setHeaderColor('#0f172a');
+            WebApp.setHeaderColor('#1a1b26'); // Trùng màu game-bg
             await fetchUserData(WebApp.initDataUnsafe.user.id);
           } else {
              setLoading(false);
           }
-        } catch (e) {
-          console.error("SDK Error", e);
-        }
+        } catch (e) { console.error(e); }
       }
     };
     initApp();
@@ -61,26 +57,23 @@ export default function Home() {
     const { data } = await supabase.from('users').select('*').eq('telegram_id', telegramId).single();
     if (data) {
       setUserData(data);
-      // setEnergy(data.energy); // Sau này sẽ lấy energy thật từ DB
+      setLocalCoins(data.coins);
+      setLocalEnergy(data.energy);
     }
     setLoading(false);
   };
 
-  // --- CORE TAP LOGIC ---
+  // --- TAP LOGIC ---
   const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
-    // 1. Check điều kiện: Còn năng lượng không?
-    if (energy <= 0) {
-        // Rung kiểu báo lỗi (Notification Error)
+    if (localEnergy <= 0) {
         webAppRef.current?.HapticFeedback.notificationOccurred('error');
         return; 
     }
 
-    // 2. Kích hoạt Rung (Haptic - Medium Impact) -> SƯỚNG TAY LÀ Ở ĐÂY
-    if (webAppRef.current) {
-        webAppRef.current.HapticFeedback.impactOccurred('medium');
-    }
+    // 1. Haptic
+    webAppRef.current?.HapticFeedback.impactOccurred('medium');
 
-    // 3. Tính toán vị trí hiện số
+    // 2. Position
     let clientX, clientY;
     if ('touches' in e) {
       clientX = e.touches[0].clientX;
@@ -90,74 +83,77 @@ export default function Home() {
       clientY = (e as React.MouseEvent).clientY;
     }
 
-    // 4. Update UI ngay lập tức
+    // 3. UI Updates
     const newClick = { id: Date.now(), x: clientX, y: clientY, value: 1 };
     setClicks((prev) => [...prev, newClick]);
     setTimeout(() => setClicks((prev) => prev.filter((c) => c.id !== newClick.id)), 800);
 
-    setUserData((prev) => prev ? { ...prev, coins: prev.coins + 1 } : null);
-    setEnergy((prev) => Math.max(0, prev - 1)); // Trừ năng lượng
+    // Cập nhật State cục bộ ngay lập tức
+    setLocalCoins(prev => prev + 1);
+    setLocalEnergy(prev => Math.max(0, prev - 1));
 
-    // 5. Logic Sync Server (RPC)
-    unsavedCoinsRef.current += 1;
+    // 4. Sync Logic (Debounce)
+    pendingUpdatesRef.current.coins += 1;
+    pendingUpdatesRef.current.energy += 1; // Số năng lượng tiêu thụ
+
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     
     timeoutRef.current = setTimeout(async () => {
-      if (unsavedCoinsRef.current > 0 && userData) {
-        const amount = unsavedCoinsRef.current;
-        unsavedCoinsRef.current = 0;
+      if (userData && pendingUpdatesRef.current.coins > 0) {
+        const payload = { ...pendingUpdatesRef.current };
+        pendingUpdatesRef.current = { coins: 0, energy: 0 }; // Reset
         
-        // Gọi hàm RPC `increment_coins` thay vì update thẳng
-        await supabase.rpc('increment_coins', { 
-            row_id: userData.id, 
-            amount: amount 
+        // Gọi hàm SQL mới: tap_gameplay
+        await supabase.rpc('tap_gameplay', { 
+            p_user_id: userData.id, 
+            p_coins_add: payload.coins,
+            p_energy_consume: payload.energy
         });
-        
-        console.log(`Synced +${amount} coins`);
+        console.log("Synced to DB:", payload);
       }
-    }, 2000);
+    }, 1500); // Sync sau 1.5s
   };
 
   return (
-    <div className="relative min-h-screen bg-slate-900 text-white overflow-hidden font-sans select-none touch-none">
+    <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
       <ClickEffects clicks={clicks} />
 
-      {/* Background Decor */}
-      <div className="absolute top-[-20%] left-[-20%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px]" />
+      {/* Glow Background */}
+      <div className="absolute top-[-20%] left-[-20%] w-[500px] h-[500px] bg-game-primary/20 rounded-full blur-[120px]" />
       
-      {/* Header Info */}
+      {/* HEADER */}
       <header className="absolute top-0 w-full p-6 flex justify-between z-50 pointer-events-none">
          <div className="flex flex-col space-y-2 pointer-events-auto">
-            {/* Coin Badge */}
-            <div className="flex items-center space-x-2">
-                <div className="w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg shadow-yellow-400/20 text-xl animate-bounce-slow">
-                    🪙
+            <div className="flex items-center space-x-3 bg-black/20 backdrop-blur-md p-2 rounded-2xl border border-white/5">
+                {/* Icon Coin 3D hơn */}
+                <div className="w-10 h-10 bg-gradient-to-br from-yellow-300 to-orange-500 rounded-xl flex items-center justify-center shadow-lg transform rotate-3">
+                    <Gem size={20} className="text-white drop-shadow-md" />
                 </div>
-                <div className="flex flex-col">
-                    <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Balance</span>
-                    <span className="text-2xl font-black text-white leading-none">
-                        {userData?.coins.toLocaleString() || 0}
+                <div className="flex flex-col pr-2">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Soul Shards</span>
+                    <span className="text-xl font-black text-white leading-none tracking-wide">
+                        {localCoins.toLocaleString()}
                     </span>
                 </div>
             </div>
          </div>
       </header>
 
-      {/* Main Game */}
+      {/* MAIN GAME */}
       <main className="relative z-10 w-full h-screen pt-10">
         {activeTab === 'home' && <RoomScene onTap={handleTap} />}
       </main>
 
-      {/* Energy Bar (Nằm trên thanh điều hướng) */}
-      <div className="fixed bottom-28 left-6 right-6 z-40">
-        <div className="flex justify-between text-xs font-bold mb-1 text-slate-300">
-            <div className="flex items-center"><Zap size={14} className="text-yellow-400 mr-1"/> Energy</div>
-            <div>{energy} / {MAX_ENERGY}</div>
+      {/* THANH NĂNG LƯỢNG (Chuẩn style mới) */}
+      <div className="fixed bottom-28 left-6 right-6 z-40 pointer-events-none">
+        <div className="flex justify-between text-xs font-bold mb-1.5 px-1">
+            <div className="flex items-center text-game-accent"><Zap size={14} className="mr-1 fill-game-accent"/> Energy</div>
+            <div className="text-slate-400">{localEnergy} / {MAX_ENERGY}</div>
         </div>
-        <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden border border-white/5 backdrop-blur-sm">
+        <div className="w-full h-4 bg-black/40 rounded-full p-0.5 border border-white/5 backdrop-blur-sm">
             <div 
-                className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 transition-all duration-300 ease-out"
-                style={{ width: `${(energy / MAX_ENERGY) * 100}%` }}
+                className="h-full bg-game-accent rounded-full shadow-[0_0_10px_rgba(45,212,191,0.5)] transition-all duration-300 ease-out"
+                style={{ width: `${(localEnergy / MAX_ENERGY) * 100}%` }}
             />
         </div>
       </div>
