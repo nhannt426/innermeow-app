@@ -1,9 +1,8 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import Image from 'next/image';
-import { useState, useEffect } from 'react';
-import { Sparkles } from 'lucide-react';
+import Image from 'next/image'; // Nhớ import Image
+import { useState } from 'react';
 
 interface RoomSceneProps {
   onPet: (e: React.MouseEvent | React.TouchEvent) => void;
@@ -16,7 +15,7 @@ export default function RoomScene({ onPet, onCollectBubble, isSleeping, bubbles 
   const [isPressed, setIsPressed] = useState(false);
 
   const handlePointerDown = (e: any) => {
-    if (isSleeping) return; // Đang ngủ thì không vuốt được
+    if (isSleeping) return;
     setIsPressed(true);
     onPet(e);
   };
@@ -31,7 +30,14 @@ export default function RoomScene({ onPet, onCollectBubble, isSleeping, bubbles 
         className="relative w-[360px] h-[360px] flex items-center justify-center pointer-events-none"
       >
         <div className="absolute w-[220px] h-[220px] bg-game-primary/20 rounded-full blur-[80px]" />
-        <Image src="/assets/bg-room.png" alt="Room" width={380} height={380} className="object-contain drop-shadow-2xl z-0" priority />
+        <Image 
+          src="/assets/bg-room.png" 
+          alt="Room" 
+          width={380} 
+          height={380} 
+          className="object-contain drop-shadow-2xl z-0" 
+          priority 
+        />
       </motion.div>
 
       {/* 2. Cat Character */}
@@ -40,16 +46,23 @@ export default function RoomScene({ onPet, onCollectBubble, isSleeping, bubbles 
         animate={{ 
           y: isPressed ? 10 : 0, 
           scale: isPressed ? 0.95 : 1,
-          opacity: isSleeping ? 0.8 : 1 // Mờ đi xíu nếu ngủ
+          opacity: isSleeping ? 0.8 : 1
         }}
         transition={{ type: "spring", stiffness: 300, damping: 20 }}
         onPointerDown={handlePointerDown}
         onPointerUp={() => setIsPressed(false)}
         onPointerLeave={() => setIsPressed(false)}
       >
-        <Image src="/assets/cat-idle.png" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl pointer-events-auto" draggable={false} />
+        <Image 
+          src="/assets/cat-idle.png" 
+          alt="Cat" 
+          width={170} 
+          height={170} 
+          className="object-contain drop-shadow-xl pointer-events-auto" 
+          draggable={false} 
+        />
         
-        {/* Sleeping Effect (Zzz) */}
+        {/* Sleeping Status */}
         {isSleeping && (
           <motion.div 
             initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }}
@@ -60,7 +73,7 @@ export default function RoomScene({ onPet, onCollectBubble, isSleeping, bubbles 
         )}
       </motion.div>
 
-      {/* 3. Floating Bubbles (Bong bóng) */}
+      {/* 3. Floating Bubbles (3D Image) */}
       <AnimatePresence>
         {bubbles.map((b) => (
           <FloatingBubble key={b.id} x={b.x} y={b.y} onClick={() => onCollectBubble(b.id)} />
@@ -70,19 +83,43 @@ export default function RoomScene({ onPet, onCollectBubble, isSleeping, bubbles 
   );
 }
 
-// Component Bong Bóng Nhỏ
+// Component Bong Bóng 3D
 function FloatingBubble({ x, y, onClick }: { x: number, y: number, onClick: () => void }) {
+  // Random kích thước bong bóng một chút cho tự nhiên (48px - 64px)
+  const size = 48 + Math.random() * 16; 
+  
   return (
     <motion.button
       initial={{ scale: 0, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1, y: [y, y - 20, y] }} // Bay lên xuống
-      exit={{ scale: 1.5, opacity: 0 }}
-      transition={{ y: { duration: 3, repeat: Infinity, ease: "easeInOut" } }}
+      animate={{ 
+        scale: 1, 
+        opacity: 1, 
+        y: [y, y - 30, y], // Bay lên cao hơn xíu rồi xuống
+        x: [x, x + 5, x - 5, x] // Lắc lư qua lại nhẹ nhàng
+      }} 
+      exit={{ scale: 1.5, opacity: 0 }} // Nổ to ra khi biến mất
+      transition={{ 
+        y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
+        x: { duration: 5, repeat: Infinity, ease: "easeInOut" }
+      }}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className="absolute w-12 h-12 bg-white/10 backdrop-blur-md rounded-full border border-game-accent/30 flex items-center justify-center shadow-[0_0_15px_rgba(45,212,191,0.3)] z-20 hover:scale-110 active:scale-90"
-      style={{ left: `${x}%`, top: `${y}%` }}
+      className="absolute z-30 touch-manipulation" // touch-manipulation giúp tap nhạy hơn trên mobile
+      style={{ 
+        left: `${x}%`, 
+        top: `${y}%`,
+        width: size,
+        height: size
+      }}
     >
-      <Sparkles size={16} className="text-game-accent" />
+      {/* 3D Bubble Image */}
+      <div className="relative w-full h-full drop-shadow-[0_0_10px_rgba(45,212,191,0.4)] hover:scale-110 active:scale-90 transition-transform duration-200">
+        <Image 
+          src="/assets/icons/bubble-3d.png"
+          alt="Dream Bubble"
+          fill
+          className="object-contain"
+        />
+      </div>
     </motion.button>
   )
 }
