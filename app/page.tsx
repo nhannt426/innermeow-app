@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Image from 'next/image'; // <--- Quan trọng: Import Image
 import { supabase } from '@/utils/supabase/client';
 import RoomScene from '@/components/game/RoomScene';
 import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
-import { Loader2, Settings, Heart, Star } from 'lucide-react';
+import { Loader2, Settings } from 'lucide-react'; // Bỏ Star, Heart vector đi
 
 // --- CONFIG ---
-const MAX_HAPPINESS = 20; // Vuốt 20 cái là đầy
+const MAX_HAPPINESS = 20;
 
 interface UserData {
   id: string;
@@ -25,9 +26,9 @@ export default function Home() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // --- GAMEPLAY STATES ---
+  // States
   const [coins, setCoins] = useState(0);
-  const [happiness, setHappiness] = useState(0); // 0 -> 20
+  const [happiness, setHappiness] = useState(0);
   const [isSleeping, setIsSleeping] = useState(false);
   const [bubbles, setBubbles] = useState<{id: number, x: number, y: number}[]>([]);
   const [isShopOpen, setIsShopOpen] = useState(false);
@@ -52,12 +53,12 @@ export default function Home() {
     };
     init();
 
-    // Spawn Bubbles giả lập (Cứ 5s mọc 1 cái để test)
+    // Spawn Bubbles Loop
     const bubbleInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && Math.random() > 0.5) {
+      if (document.visibilityState === 'visible' && Math.random() > 0.6) {
         spawnBubble();
       }
-    }, 5000);
+    }, 4000);
     return () => clearInterval(bubbleInterval);
   }, []);
 
@@ -71,95 +72,95 @@ export default function Home() {
   };
 
   const spawnBubble = () => {
-    if (bubbles.length >= 5) return; // Max 5 bóng
+    if (bubbles.length >= 6) return;
     const newBubble = {
       id: Date.now(),
-      x: 20 + Math.random() * 60, // Random vị trí X (20% - 80%)
-      y: 30 + Math.random() * 40  // Random vị trí Y (30% - 70%)
+      x: 15 + Math.random() * 70, 
+      y: 25 + Math.random() * 40
     };
     setBubbles(prev => [...prev, newBubble]);
   };
 
   // --- ACTIONS ---
-
-  // 1. Vuốt Mèo
   const handlePet = (e: any) => {
     if (isSleeping) {
        webAppRef.current?.HapticFeedback.notificationOccurred('warning');
        return;
     }
 
-    // Tăng Happy
     if (happiness < MAX_HAPPINESS) {
       setHappiness(prev => prev + 1);
       webAppRef.current?.HapticFeedback.impactOccurred('light');
-      
-      // Visual Heart
       const { clientX, clientY } = e.touches ? e.touches[0] : e;
-      const newClick = { id: Date.now(), x: clientX, y: clientY };
-      setClicks(prev => [...prev, newClick]);
-      setTimeout(() => setClicks(prev => prev.filter(c => c.id !== newClick.id)), 1000);
+      setClicks(prev => [...prev, { id: Date.now(), x: clientX, y: clientY }]);
     } 
     
-    // Nếu đầy cây -> Nhận quà & Ngủ
     if (happiness + 1 >= MAX_HAPPINESS) {
       handleClaimGift();
     }
   };
 
   const handleClaimGift = () => {
-    const reward = 100 + (userData?.click_level || 1) * 20; // Quà to
+    const reward = 150 + (userData?.click_level || 1) * 30;
     setCoins(prev => prev + reward);
     setHappiness(0);
-    setIsSleeping(true); // Mèo đi ngủ
+    setIsSleeping(true);
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
-    
-    // Sync to DB (Giả lập update)
-    if (userData) {
-        supabase.rpc('increment_coins', { row_id: userData.id, amount: reward });
-    }
-
-    // Tỉnh dậy sau 10 giây (Demo)
-    setTimeout(() => setIsSleeping(false), 10000); 
+    if (userData) supabase.rpc('increment_coins', { row_id: userData.id, amount: reward });
+    setTimeout(() => setIsSleeping(false), 15000); 
   };
 
-  // 2. Thu hoạch Bong bóng
   const handleCollectBubble = (id: number) => {
     setBubbles(prev => prev.filter(b => b.id !== id));
-    setCoins(prev => prev + 25); // +25 stars mỗi bóng
+    setCoins(prev => prev + 30);
     webAppRef.current?.HapticFeedback.selectionChanged();
   };
 
-  // 3. Mua đồ
   const handleUpgrade = async (type: 'click' | 'energy', cost: number) => {
-    if(coins < cost) return;
-    setCoins(prev => prev - cost);
-    // Gọi RPC (bạn tự tích hợp lại code cũ nhé, đây là UI demo)
-    webAppRef.current?.HapticFeedback.notificationOccurred('success');
+     // Logic mua hàng (giữ nguyên logic cũ hoặc gọi RPC)
+     if(coins >= cost) {
+         setCoins(prev => prev - cost);
+         // Demo UI update only
+     }
   };
 
-  // 4. Navigation
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (tab === 'shop') setIsShopOpen(true);
-    else setIsShopOpen(false); // Tự đóng Shop khi chuyển tab khác
+    else setIsShopOpen(false);
   };
 
   return (
     <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
       <ClickEffects clicks={clicks} />
 
-      {/* --- HEADER --- */}
+      {/* --- HEADER (3D VISUAL) --- */}
       <header className="absolute top-0 w-full p-6 flex justify-between z-40 pointer-events-none">
          <div className="flex flex-col gap-1 pointer-events-auto">
-            {/* Stars/Coins Badge */}
-            <div className="flex items-center gap-3 bg-black/20 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
-                <Star size={20} className="text-yellow-400 fill-yellow-400 animate-pulse-slow" />
-                <span className="text-xl font-black text-white tracking-wide">{coins.toLocaleString()}</span>
+            {/* Khung chứa điểm số */}
+            <div className="relative pl-12 pr-6 py-3 bg-black/30 backdrop-blur-xl rounded-full border border-white/10 shadow-lg">
+                
+                {/* 3D STAR ICON (Trồi ra ngoài) */}
+                <div className="absolute -left-2 -top-2 w-16 h-16 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-float">
+                    <Image 
+                        src="/assets/icons/star-3d.png" 
+                        alt="Star" 
+                        fill 
+                        className="object-contain"
+                    />
+                </div>
+
+                <div className="flex flex-col items-start justify-center leading-none">
+                    <span className="text-[10px] text-yellow-200/80 font-bold uppercase tracking-widest mb-1">Stars</span>
+                    <span className="text-2xl font-black text-white tracking-wide drop-shadow-md">
+                        {coins.toLocaleString()}
+                    </span>
+                </div>
             </div>
          </div>
-         <button className="w-10 h-10 rounded-full bg-white/5 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto">
-            <Settings size={20} className="text-white/70" />
+         
+         <button className="w-12 h-12 rounded-full bg-black/20 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto hover:bg-white/10 active:scale-95 transition-all">
+            <Settings size={22} className="text-white/80" />
          </button>
       </header>
 
@@ -175,17 +176,38 @@ export default function Home() {
         )}
       </main>
 
-      {/* --- HAPPINESS BAR --- */}
-      <div className="fixed bottom-28 left-8 right-8 z-30 pointer-events-none">
-        <div className="flex justify-between text-xs font-bold mb-2 px-1 text-pink-200">
-            <span className="flex items-center gap-1"><Heart size={12} className="fill-pink-400 text-pink-400"/> Happiness</span>
-            <span>{isSleeping ? 'Sleeping...' : `${happiness} / ${MAX_HAPPINESS}`}</span>
-        </div>
-        <div className="w-full h-5 bg-black/40 rounded-full p-1 border border-white/5 backdrop-blur-sm">
-            <div 
-                className={`h-full rounded-full transition-all duration-500 ease-out ${isSleeping ? 'bg-slate-600' : 'bg-gradient-to-r from-pink-500 to-rose-400 shadow-[0_0_15px_rgba(244,114,182,0.6)]'}`}
-                style={{ width: isSleeping ? '100%' : `${(happiness / MAX_HAPPINESS) * 100}%` }}
-            />
+      {/* --- HAPPINESS BAR (3D VISUAL) --- */}
+      <div className="fixed bottom-28 left-6 right-6 z-30 pointer-events-none flex justify-center">
+        <div className="relative w-full max-w-sm">
+            
+            {/* 3D HEART ICON (Nằm bên trái thanh) */}
+            <div className="absolute -left-1 -top-4 w-14 h-14 z-20 drop-shadow-[0_4px_8px_rgba(244,114,182,0.5)]">
+                 <Image 
+                    src="/assets/icons/heart-3d.png" 
+                    alt="Happiness" 
+                    fill 
+                    className={`object-contain transition-transform duration-300 ${isSleeping ? 'grayscale' : 'scale-100'}`}
+                 />
+            </div>
+
+            {/* Thanh chứa */}
+            <div className="w-full h-8 bg-[#12131c]/80 rounded-full border border-white/10 backdrop-blur-md overflow-hidden p-1 shadow-xl pl-12 relative">
+                
+                {/* Text chỉ số (Nằm giữa thanh) */}
+                <div className="absolute inset-0 flex items-center justify-center z-10 text-xs font-bold text-white/90 drop-shadow-sm">
+                    {isSleeping ? 'Sleeping (Zzz)...' : `${happiness} / ${MAX_HAPPINESS} Happiness`}
+                </div>
+
+                {/* Thanh tiến trình (Gradient Hồng) */}
+                <div 
+                    className={`h-full rounded-full transition-all duration-500 ease-out 
+                        ${isSleeping 
+                            ? 'bg-slate-700/50' 
+                            : 'bg-gradient-to-r from-pink-500 via-rose-400 to-pink-300 shadow-[0_0_20px_rgba(244,114,182,0.6)]'
+                        }`}
+                    style={{ width: isSleeping ? '100%' : `${(happiness / MAX_HAPPINESS) * 100}%` }}
+                />
+            </div>
         </div>
       </div>
 
@@ -195,6 +217,8 @@ export default function Home() {
         coins={coins} clickLevel={userData?.click_level || 1} energyLevel={userData?.energy_level || 1}
         onUpgrade={handleUpgrade}
       />
+      
+      {/* Truyền activeTab vào Navigation để xử lý icon 3D */}
       <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* Loading */}
