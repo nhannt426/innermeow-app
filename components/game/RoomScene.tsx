@@ -1,41 +1,76 @@
 'use client';
 
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
-import HeartbeatRing from './HeartbeatRing'; // Import Component mới
+import { useState, useRef } from 'react';
+import { GameItem, getRandomItem } from '@/lib/game-config'; // Import config
 
 interface RoomSceneProps {
-  onPetSuccess: () => void;
-  onCollectBubble: (id: number) => void;
-  isSleeping: boolean;
-  sleepUntil: number | null; // Timestamp
+  userLevel: number; // Dùng để random đồ xịn hay dỏm
+  onInteractSuccess: (reward: number, type: string) => void;
   bubbles: { id: number; x: number; y: number }[];
+  onPopBubble: (id: number) => void;
 }
 
-export default function RoomScene({ onPetSuccess, onCollectBubble, isSleeping, sleepUntil, bubbles }: RoomSceneProps) {
-  
-  // Logic đếm ngược
-  const [timeLeft, setTimeLeft] = useState('');
-  
-  useEffect(() => {
-    if (!isSleeping || !sleepUntil) return;
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const diff = sleepUntil - now;
-      if (diff <= 0) {
-        setTimeLeft("Waking up...");
-      } else {
-        const m = Math.floor(diff / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        setTimeLeft(`${m}:${s < 10 ? '0' : ''}${s}`);
+// Định nghĩa vật phẩm đang rơi trên sàn
+interface DroppedItem extends GameItem {
+  instanceId: number; // ID riêng cho từng lần rớt
+  x: number;
+  y: number;
+}
+
+export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
+  const [droppedItems, setDroppedItems] = useState<DroppedItem[]>([]);
+  const catRef = useRef<HTMLDivElement>(null); // Để xác định vị trí mèo
+
+  // Xử lý khi bấm vỡ bong bóng
+  const handleBubbleClick = (id: number, x: number, y: number) => {
+    onPopBubble(id); // Xóa bong bóng
+    
+    // Random ra vật phẩm
+    const itemConfig = getRandomItem(userLevel);
+    const newItem: DroppedItem = {
+      ...itemConfig,
+      instanceId: Date.now(),
+      x: x, // Rớt ngay tại vị trí bong bóng
+      y: y
+    };
+    
+    setDroppedItems(prev => [...prev, newItem]);
+  };
+
+  // Xử lý khi thả vật phẩm (Drag End)
+  const handleDragEnd = (event: any, info: any, item: DroppedItem) => {
+    // Lấy vị trí con mèo
+    const catRect = catRef.current?.getBoundingClientRect();
+    const dropX = info.point.x;
+    const dropY = info.point.y;
+
+    if (catRect) {
+      // Kiểm tra va chạm (Collision Detection)
+      // Nếu điểm thả nằm trong vùng của con mèo
+      if (
+        dropX >= catRect.left && 
+        dropX <= catRect.right && 
+        dropY >= catRect.top && 
+        dropY <= catRect.bottom
+      ) {
+        // TRÚNG MÈO!
+        handleItemConsumed(item);
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isSleeping, sleepUntil]);
+    }
+  };
+
+  const handleItemConsumed = (item: DroppedItem) => {
+    // 1. Xóa vật phẩm khỏi sàn
+    setDroppedItems(prev => prev.filter(i => i.instanceId !== item.instanceId));
+    
+    // 2. Gọi hàm Success để cộng tiền & hiện tim
+    onInteractSuccess(item.reward, item.type);
+  };
 
   return (
-    <div className="relative w-full h-[60vh] mt-10 flex items-center justify-center select-none touch-none">
+    <div className="relative w-full h-[65vh] mt-6 flex items-center justify-center select-none touch-none">
       
       {/* Background */}
       <motion.div 
@@ -47,60 +82,79 @@ export default function RoomScene({ onPetSuccess, onCollectBubble, isSleeping, s
         <Image src="/assets/bg-room.png" alt="Room" width={380} height={380} className="object-contain drop-shadow-2xl z-0" priority />
       </motion.div>
 
-      {/* Cat Character */}
+      {/* --- CAT CHARACTER (DROP ZONE) --- */}
       <motion.div
+        ref={catRef} // Gắn ref để bắt va chạm
         className="absolute z-10 mb-[-30px]"
-        animate={{ 
-          y: [0, -5, 0],
-          opacity: isSleeping ? 0.6 : 1,
-          scale: isSleeping ? 0.95 : 1
-        }}
+        animate={{ y: [0, -5, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
-        <Image src="/assets/cat-idle.png" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl" draggable={false} />
+        <Image src="/assets/cat-idle.png" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl pointer-events-none" />
       </motion.div>
 
-      {/* --- LAYER TƯƠNG TÁC --- */}
-      
-      {/* 1. Nếu đang ngủ: Hiện đồng hồ */}
-      {isSleeping ? (
-        <div className="absolute z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md rounded-2xl p-4 border border-white/10 shadow-xl">
-          <span className="text-3xl font-black text-white tracking-widest font-mono">{timeLeft}</span>
-          <span className="text-xs text-game-primary uppercase font-bold mt-1">Recharging Energy</span>
-        </div>
-      ) : (
-        /* 2. Nếu thức: Hiện Heartbeat Game */
-        <HeartbeatRing 
-          onSuccess={onPetSuccess}
-          onFail={() => { /* Rung nhẹ báo fail nếu muốn */ }}
-        />
-      )}
+      {/* --- DROPPED ITEMS (DRAGGABLE) --- */}
+      <AnimatePresence>
+        {droppedItems.map((item) => (
+          <DraggableItem 
+            key={item.instanceId} 
+            item={item} 
+            onDragEnd={handleDragEnd} 
+          />
+        ))}
+      </AnimatePresence>
 
-      {/* Floating 3D Bubbles */}
+      {/* --- FLOATING BUBBLES --- */}
       <AnimatePresence>
         {bubbles.map((b) => (
-          <FloatingBubble key={b.id} x={b.x} y={b.y} onClick={() => onCollectBubble(b.id)} />
+          <FloatingBubble key={b.id} x={b.x} y={b.y} onClick={() => handleBubbleClick(b.id, b.x, b.y)} />
         ))}
       </AnimatePresence>
     </div>
   );
 }
 
-function FloatingBubble({ x, y, onClick }: { x: number, y: number, onClick: () => void }) {
-  const size = 50 + Math.random() * 15; 
+// Component Item Kéo Thả
+function DraggableItem({ item, onDragEnd }: { item: DroppedItem, onDragEnd: any }) {
   return (
-    <motion.button
-      initial={{ scale: 0, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1, y: [y, y - 25, y], x: [x, x + 6, x] }} 
-      exit={{ scale: 1.8, opacity: 0 }}
-      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className="absolute z-30 touch-manipulation"
-      style={{ left: `${x}%`, top: `${y}%`, width: size, height: size }}
+    <motion.div
+      initial={{ opacity: 0, scale: 0, y: -50 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }} // Rớt xuống sàn
+      exit={{ opacity: 0, scale: 0.5 }}
+      drag
+      dragMomentum={false} // Thả là dừng, không trượt
+      whileDrag={{ scale: 1.2, cursor: 'grabbing', zIndex: 50 }}
+      onDragEnd={(e, info) => onDragEnd(e, info, item)}
+      className="absolute z-20 cursor-grab touch-action-none"
+      // Vì logic tọa độ kéo thả hơi phức tạp, ta dùng trick CSS để định vị ban đầu
+      // Lưu ý: Logic này demo, thực tế cần tính toán pixel chính xác hơn nếu muốn rớt đúng chỗ bóng vỡ
+      style={{ bottom: '10%', left: `${item.x}%` }} 
     >
-      <div className="relative w-full h-full drop-shadow-[0_0_15px_rgba(45,212,191,0.5)] hover:scale-110 active:scale-90 transition-transform">
-        <Image src="/assets/icons/bubble-3d.png" alt="Bubble" fill className="object-contain" />
+      <div className="w-16 h-16 drop-shadow-lg filter hover:brightness-110">
+         <Image src={item.src} alt={item.name} width={64} height={64} className="object-contain" />
+         {/* Nhãn tên item nhỏ */}
+         <div className="absolute -bottom-4 w-full text-center">
+             <span className="text-[9px] bg-black/50 text-white px-1.5 py-0.5 rounded-full backdrop-blur-sm whitespace-nowrap">
+                {item.name}
+             </span>
+         </div>
       </div>
-    </motion.button>
+    </motion.div>
+  )
+}
+
+// Component Bong Bóng (Giữ nguyên logic cũ nhưng chỉnh vị trí Spawn ở cha)
+function FloatingBubble({ x, y, onClick }: { x: number, y: number, onClick: () => void }) {
+  // ... (Code cũ giữ nguyên, chỉ đảm bảo onClick hoạt động)
+  return (
+      <motion.button
+        initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 1.5, opacity: 0 }}
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className="absolute z-30 w-16 h-16" // To hơn (64px)
+        style={{ left: `${x}%`, top: `${y}%` }}
+      >
+        <div className="relative w-full h-full animate-float drop-shadow-[0_0_15px_rgba(45,212,191,0.5)]">
+            <Image src="/assets/icons/bubble-3d.png" alt="Bubble" fill className="object-contain" />
+        </div>
+      </motion.button>
   )
 }
