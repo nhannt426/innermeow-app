@@ -1,34 +1,42 @@
 import useSound from 'use-sound';
 
 export const useGameSound = () => {
-  // 1. SFX: Bong bóng nổ (Thêm sprite hoặc chỉnh volume)
+  // 1. BGM: Dùng html5: true để stream file lớn tốt hơn, tránh lag
+  const [playBgm, { stop: stopBgm, sound: bgmSound }] = useSound('/sounds/bg.mp3', { 
+    loop: true, 
+    volume: 0.4, 
+    html5: true,
+    interrupt: true
+  });
+
+  // 2. POP: Tiếng nổ (Giữ nguyên)
   const [playPop] = useSound('/sounds/pop.mp3', { volume: 0.6 });
   
-  // 2. SFX: Rớt đồ
-  const [playDrop] = useSound('/sounds/drop.mp3', { volume: 0.5 });
+  // 3. DROP: Tiếng rơi (Tăng volume lên vì thường tiếng này rất trầm)
+  const [playDrop] = useSound('/sounds/drop.mp3', { volume: 1.0 }); // Max volume
   
-  // 3. SFX: Mèo ăn/dùng đồ (Nghe sướng tai nhất)
-  const [playEat] = useSound('/sounds/eat.mp3', { volume: 0.8 });
+  // 4. EAT: Tiếng ăn
+  const [playEat] = useSound('/sounds/eat.mp3', { volume: 0.8, interrupt: true });
   
-  // 4. SFX: Thành công/Nhận tiền
-  const [playSuccess] = useSound('/sounds/success.mp3', { volume: 0.5 });
+  // 5. PURR: Tiếng sướng (Tăng volume)
+  const [playPurr] = useSound('/sounds/purr.mp3', { volume: 1.0, interrupt: true });
   
-  // 5. SFX: UI Click
-  const [playUi] = useSound('/sounds/ui.mp3', { volume: 0.3 });
+  // 6. SUCCESS: Tiếng tiền về
+  const [playSuccess] = useSound('/sounds/success.mp3', { volume: 0.6, interrupt: true });
+  
+  // 7. UI: Tiếng click
+  const [playUi] = useSound('/sounds/ui.mp3', { volume: 0.5 });
 
-  // Hàm wrapper để play Pop với cao độ ngẫu nhiên (Biến âm thanh trở nên "Juicy")
   const playPopRandom = () => {
-    // Random playbackRate từ 0.9 đến 1.1 -> Tiếng nổ sẽ khác nhau mỗi lần
-    // playPop({ playbackRate: 0.9 + Math.random() * 0.2 }); 
-    // Lưu ý: use-sound bản basic có thể chưa support dynamic playbackRate trực tiếp trong hàm play ngay, 
-    // nhưng ta cứ gọi mặc định trước cho mượt.
-    playPop();
+    playPop({ playbackRate: 0.9 + Math.random() * 0.2 }); 
   };
 
   return {
+    playBgm, stopBgm, bgmSound,
     playPop: playPopRandom,
     playDrop,
     playEat,
+    playPurr,
     playSuccess,
     playUi
   };

@@ -22,7 +22,7 @@ interface DroppedItem extends GameItem {
 export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
   const [droppedItems, setDroppedItems] = useState<DroppedItem[]>([]);
   const catRef = useRef<HTMLDivElement>(null);
-  const { playPop, playDrop, playEat } = useGameSound();
+  const { playPop, playDrop } = useGameSound();
 
   const handleBubbleClick = (id: number, x: number, y: number) => {
     playPop();
@@ -31,7 +31,7 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
     
     // Random nhẹ vị trí rơi xung quanh bong bóng vỡ cho tự nhiên
     const dropOffsetX = (Math.random() - 0.5) * 5; 
-    setTimeout(() => playDrop(), 100);
+    setTimeout(() => playDrop(), 300);
     const newItem: DroppedItem = {
       ...itemConfig,
       instanceId: Date.now(),
@@ -53,8 +53,7 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
         dropX <= catRect.right + 30 && 
         dropY >= catRect.top - 30 && 
         dropY <= catRect.bottom + 30
-      ) {
-        playEat();
+      ) {       
         handleItemConsumed(item);
       }
     }

@@ -54,32 +54,26 @@ export default function Home() {
   const unsavedCoinsRef = useRef(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { playSuccess, playUi } = useGameSound();
-
-  // --- SETUP NHẠC NỀN (BGM) ---
-  // loop: true để nhạc chạy mãi mãi
-  // interrupt: true để đảm bảo không bị chồng nhạc
-  const [playBgm, { stop: stopBgm }] = useSound('/sounds/bgm.mp3', { 
-    loop: true, 
-    volume: 0.3, // Nhạc nền nên nhỏ thôi để nghe SFX
-    interrupt: true 
-  });
+  const { playBgm, playEat, playSuccess, playPurr, playUi } = useGameSound();
 
   // Kích hoạt nhạc nền khi user tương tác lần đầu
   useEffect(() => {
-    const startAudio = () => {
+    const handleUserInteraction = () => {
+      // Chỉ play nếu chưa play (browser policies)
       playBgm();
-      // Xóa event listener sau khi đã bật nhạc thành công
-      window.removeEventListener('click', startAudio);
-      window.removeEventListener('touchstart', startAudio);
+      // Xóa listener để không gọi lại nhiều lần
+      window.removeEventListener('click', handleUserInteraction);
+      window.removeEventListener('touchstart', handleUserInteraction);
     };
 
-    // Trình duyệt chặn autoplay, nên phải chờ user chạm vào màn hình lần đầu mới phát nhạc được
-    window.addEventListener('click', startAudio);
-    window.addEventListener('touchstart', startAudio);
+    window.addEventListener('click', handleUserInteraction);
+    window.addEventListener('touchstart', handleUserInteraction);
 
-    return () => stopBgm();
-  }, [playBgm, stopBgm]);
+    return () => {
+        window.removeEventListener('click', handleUserInteraction);
+        window.removeEventListener('touchstart', handleUserInteraction);
+    };
+  }, [playBgm]);
 
   // --- 1. FORCE SAVE COINS ---
   const saveProgress = async () => {
@@ -222,10 +216,22 @@ export default function Home() {
   };
 
   const handleInteractSuccess = (reward: number, type: string) => {
-    playSuccess();
     if (isSleeping) return;
 
-    webAppRef.current?.HapticFeedback.notificationOccurred('success');
+    // Kịch bản:
+    // 1. Tiếng ăn trước (Ngay lập tức)
+    playEat();
+
+    // 2. Tiếng nhận tiền/tim (Sau 500ms - chờ tiếng ăn bớt ồn)
+    setTimeout(() => {
+        playSuccess();
+        webAppRef.current?.HapticFeedback.notificationOccurred('success');
+    }, 500);
+
+    // 3. Tiếng Gừ Gừ (Sau 1 giây - khi mọi thứ lắng xuống, tạo cảm giác dư âm)
+    setTimeout(() => {
+        playPurr();
+    }, 1200);
     setClicks(prev => [...prev, { id: Date.now(), x: window.innerWidth/2, y: window.innerHeight/2 }]);
 
     setCoins(prev => prev + reward);
