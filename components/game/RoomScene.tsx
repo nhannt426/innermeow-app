@@ -71,7 +71,7 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
         className="relative w-[360px] h-[360px] flex items-center justify-center pointer-events-none"
       >
         <div className="absolute w-[220px] h-[220px] bg-game-primary/20 rounded-full blur-[80px]" />
-        <Image src="/assets/bg-room.png" alt="Room" width={380} height={380} className="object-contain drop-shadow-2xl z-0" priority />
+        <Image src="/assets/bg-room.webp" alt="Room" width={380} height={380} className="object-contain drop-shadow-2xl z-0" priority />
       </motion.div>
 
       {/* Cat (Drop Zone) */}
@@ -81,7 +81,7 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
         animate={{ y: [0, -5, 0] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
-        <Image src="/assets/cat-idle.png" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl pointer-events-none" />
+        <Image src="/assets/cat-idle.webp" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl pointer-events-none" />
       </motion.div>
 
       {/* Dropped Items (Dùng <img> thường để KHÔNG LAG) */}

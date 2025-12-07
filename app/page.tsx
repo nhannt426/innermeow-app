@@ -47,6 +47,63 @@ export default function Home() {
   // Ref để lưu state tiền chờ sync (tránh mất tiền khi navigation)
   const unsavedCoinsRef = useRef(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveProgress = async () => {
+    const amount = unsavedCoinsRef.current;
+    if (!userData || amount === 0) return;
+
+    // Reset biến tạm ngay để tránh lưu trùng
+    unsavedCoinsRef.current = 0;
+    
+    console.log(`Force saving: +${amount} coins`);
+    
+    // Gọi RPC
+    try {
+      await supabase.rpc('increment_coins', { 
+        row_id: userData.id, 
+        amount: amount 
+      });
+    } catch (error) {
+      console.error("Save failed:", error);
+      // Nếu lỗi, trả lại tiền vào biến tạm để lần sau lưu tiếp
+      unsavedCoinsRef.current += amount; 
+    }
+  };
+
+  // 2. Trigger Sync (Dùng khi đang chơi - Debounce 1 giây)
+  const triggerSync = (amountToAdd: number) => {
+    unsavedCoinsRef.current += amountToAdd;
+    
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    
+    syncTimeoutRef.current = setTimeout(() => {
+        saveProgress();
+    }, 1000); // Giảm xuống 1s cho an toàn hơn
+  };
+
+  // 3. BẮT SỰ KIỆN THOÁT APP (Quan trọng nhất)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Khi user ẩn app hoặc chuyển tab -> Lưu ngay lập tức
+      if (document.visibilityState === 'hidden') {
+        saveProgress();
+      }
+    };
+
+    // Khi user đóng hẳn app (trên một số trình duyệt)
+    const handleBeforeUnload = () => {
+        saveProgress();
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Lưu nốt lần cuối khi component bị hủy
+      saveProgress();
+    };
+  }, [userData]); // Re-bind khi có userData
 
   const maxBubbles = userData ? 2 + userData.energy_level : 3;
 
@@ -136,24 +193,6 @@ export default function Home() {
     }
     setLoading(false);
   };
-
-  // --- SYNC TO DB (Debounce) ---
-  const triggerSync = (amountToAdd: number) => {
-    unsavedCoinsRef.current += amountToAdd;
-    
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    
-    syncTimeoutRef.current = setTimeout(async () => {
-        if (userData && unsavedCoinsRef.current > 0) {
-            const val = unsavedCoinsRef.current;
-            unsavedCoinsRef.current = 0;
-            // Gọi RPC ngầm
-            await supabase.rpc('increment_coins', { row_id: userData.id, amount: val });
-            console.log('Synced:', val);
-        }
-    }, 2000);
-  };
-
   // --- ACTIONS ---
 
   const handlePopBubble = (id: number) => {
