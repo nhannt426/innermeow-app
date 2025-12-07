@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image'; // Giữ lại cho Background và Mèo (Tĩnh)
 import { useState, useRef } from 'react';
 import { GameItem, getRandomItem } from '@/lib/game-config'; 
+import { useGameSound } from '@/hooks/useGameSound';
 
 interface RoomSceneProps {
   userLevel: number;
@@ -21,14 +22,16 @@ interface DroppedItem extends GameItem {
 export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
   const [droppedItems, setDroppedItems] = useState<DroppedItem[]>([]);
   const catRef = useRef<HTMLDivElement>(null);
+  const { playPop, playDrop, playEat } = useGameSound();
 
   const handleBubbleClick = (id: number, x: number, y: number) => {
+    playPop();
     onPopBubble(id);
     const itemConfig = getRandomItem(userLevel);
     
     // Random nhẹ vị trí rơi xung quanh bong bóng vỡ cho tự nhiên
     const dropOffsetX = (Math.random() - 0.5) * 5; 
-    
+    setTimeout(() => playDrop(), 100);
     const newItem: DroppedItem = {
       ...itemConfig,
       instanceId: Date.now(),
@@ -51,6 +54,7 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
         dropY >= catRect.top - 30 && 
         dropY <= catRect.bottom + 30
       ) {
+        playEat();
         handleItemConsumed(item);
       }
     }

@@ -9,6 +9,8 @@ import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
 import AssetPreloader from '@/components/ui/AssetPreloader';
 import { Loader2, Settings } from 'lucide-react';
+import useSound from 'use-sound'; // Import trực tiếp cho BGM
+import { useGameSound } from '@/hooks/useGameSound'; // Import hook cho SFX
 
 // --- CONFIG ---
 const MAX_HAPPINESS = 10;
@@ -51,6 +53,33 @@ export default function Home() {
   // Sync Logic
   const unsavedCoinsRef = useRef(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const { playSuccess, playUi } = useGameSound();
+
+  // --- SETUP NHẠC NỀN (BGM) ---
+  // loop: true để nhạc chạy mãi mãi
+  // interrupt: true để đảm bảo không bị chồng nhạc
+  const [playBgm, { stop: stopBgm }] = useSound('/sounds/bgm.mp3', { 
+    loop: true, 
+    volume: 0.3, // Nhạc nền nên nhỏ thôi để nghe SFX
+    interrupt: true 
+  });
+
+  // Kích hoạt nhạc nền khi user tương tác lần đầu
+  useEffect(() => {
+    const startAudio = () => {
+      playBgm();
+      // Xóa event listener sau khi đã bật nhạc thành công
+      window.removeEventListener('click', startAudio);
+      window.removeEventListener('touchstart', startAudio);
+    };
+
+    // Trình duyệt chặn autoplay, nên phải chờ user chạm vào màn hình lần đầu mới phát nhạc được
+    window.addEventListener('click', startAudio);
+    window.addEventListener('touchstart', startAudio);
+
+    return () => stopBgm();
+  }, [playBgm, stopBgm]);
 
   // --- 1. FORCE SAVE COINS ---
   const saveProgress = async () => {
@@ -193,6 +222,7 @@ export default function Home() {
   };
 
   const handleInteractSuccess = (reward: number, type: string) => {
+    playSuccess();
     if (isSleeping) return;
 
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
@@ -240,6 +270,7 @@ export default function Home() {
 
   const handleUpgrade = async (type: 'click' | 'energy', cost: number) => {
      if(coins >= cost) {
+         playSuccess();
          setCoins(prev => prev - cost);
          setUserData(prev => {
              if(!prev) return null;
@@ -257,6 +288,7 @@ export default function Home() {
   };
 
   const handleTabChange = (tab: string) => {
+    playUi();
     setActiveTab(tab);
     if (tab === 'shop') setIsShopOpen(true);
     else setIsShopOpen(false);
@@ -272,7 +304,7 @@ export default function Home() {
          <div className="flex flex-col gap-1 pointer-events-auto">
             <div className="relative pl-12 pr-6 py-3 bg-black/30 backdrop-blur-xl rounded-full border border-white/10 shadow-lg">
                 <div className="absolute -left-2 -top-2 w-16 h-16 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-float">
-                    <Image src="/assets/icons/star-3d.png" alt="Star" fill className="object-contain" />
+                    <Image src="/assets/icons/star-3d.webp" alt="Star" fill className="object-contain" />
                 </div>
                 <div className="flex flex-col items-start justify-center leading-none">
                     <span className="text-[10px] text-yellow-200/80 font-bold uppercase tracking-widest mb-1">Stars</span>
@@ -303,7 +335,7 @@ export default function Home() {
       <div className="fixed bottom-28 left-6 right-6 z-30 pointer-events-none flex justify-center">
         <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: isSleeping ? 1 : 1 }}>
             <div className="absolute -left-1 -top-4 w-14 h-14 z-20 drop-shadow-[0_4px_8px_rgba(244,114,182,0.5)]">
-                 <Image src="/assets/icons/heart-3d.png" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
+                 <Image src="/assets/icons/heart-3d.webp" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
             </div>
             <div className="w-full h-8 bg-[#12131c]/80 rounded-full border border-white/10 backdrop-blur-md overflow-hidden p-1 shadow-xl pl-12 relative">
                 <div className="absolute inset-0 flex items-center justify-center z-10 text-xs font-bold text-white/90 drop-shadow-sm font-mono tracking-wider">
