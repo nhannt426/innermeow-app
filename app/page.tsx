@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/utils/supabase/client';
 import RoomScene from '@/components/game/RoomScene';
 import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
+import AssetPreloader from '@/components/ui/AssetPreloader';
 import { Loader2, Settings } from 'lucide-react';
 
+// --- CONFIG ---
 const MAX_HAPPINESS = 10;
 const BUBBLE_GEN_RATE_MS = 5000; 
-const SLEEP_DURATION_MS = 4 * 60 * 60 * 1000;
+const SLEEP_MINUTES = 240; // 4 Tiếng (240 phút)
 
 interface UserData {
   id: string;
@@ -20,7 +22,7 @@ interface UserData {
   coins: number;
   click_level: number;
   energy_level: number;
-  // Các trường lưu DB khác nếu cần
+  sleep_until: string | null; // Thêm trường này để hứng dữ liệu từ DB
 }
 
 export default function Home() {
@@ -28,118 +30,90 @@ export default function Home() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // --- GAME STATES (Local Source of Truth) ---
+  // --- GAME STATES ---
   const [coins, setCoins] = useState(0);
   const [happiness, setHappiness] = useState(0);
   
   // Sleep Logic
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState(""); // FIX 2: String đếm ngược
-  
+  const [timeRemaining, setTimeRemaining] = useState("");
   const isSleeping = sleepUntil ? Date.now() < sleepUntil : false;
 
+  // Bubble Logic
   const [bubbles, setBubbles] = useState<{id: number, x: number, y: number}[]>([]);
   const lastBubbleTimeRef = useRef<number>(Date.now());
+
+  // UI Effects
   const [clicks, setClicks] = useState<any[]>([]);
   const [isShopOpen, setIsShopOpen] = useState(false);
   const webAppRef = useRef<any>(null);
-  
-  // Ref để lưu state tiền chờ sync (tránh mất tiền khi navigation)
+
+  // Sync Logic
   const unsavedCoinsRef = useRef(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // --- 1. FORCE SAVE COINS ---
   const saveProgress = async () => {
     const amount = unsavedCoinsRef.current;
-    if (!userData) {
-        console.error("❌ Save failed: No User Data");
-        return;
-    }
-    if (amount === 0) return;
+    if (!userData || amount === 0) return;
 
-    unsavedCoinsRef.current = 0; 
-    console.log(`🚀 Force saving: +${amount} coins for User ${userData.id}`);
+    unsavedCoinsRef.current = 0;
+    console.log(`Force saving: +${amount} coins`);
     
     try {
-      // SỬA Ở ĐÂY: Tên tham số phải khớp với hàm SQL mới
-      const { data, error } = await supabase.rpc('increment_coins', { 
-        p_user_id: userData.id,  // Khớp với p_user_id
-        p_amount: amount         // Khớp với p_amount
+      await supabase.rpc('increment_coins', { 
+        p_user_id: userData.id, 
+        p_amount: amount 
       });
-
-      if (error) throw error;
-
-      console.log("✅ Saved successfully! New balance:", data);
-
     } catch (error) {
-      console.error("❌ Save CRITICAL ERROR:", error);
-      // Hoàn tiền lại nếu lỗi
-      unsavedCoinsRef.current += amount; 
+      console.error("Save failed:", error);
+      unsavedCoinsRef.current += amount;
     }
   };
 
-  // 2. Trigger Sync (Dùng khi đang chơi - Debounce 1 giây)
   const triggerSync = (amountToAdd: number) => {
     unsavedCoinsRef.current += amountToAdd;
-    
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    
-    syncTimeoutRef.current = setTimeout(() => {
-        saveProgress();
-    }, 1000); // Giảm xuống 1s cho an toàn hơn
+    syncTimeoutRef.current = setTimeout(() => saveProgress(), 1000);
   };
 
-  // 3. BẮT SỰ KIỆN THOÁT APP (Quan trọng nhất)
   useEffect(() => {
     const handleVisibilityChange = () => {
-      // Khi user ẩn app hoặc chuyển tab -> Lưu ngay lập tức
-      if (document.visibilityState === 'hidden') {
-        saveProgress();
-      }
+      if (document.visibilityState === 'hidden') saveProgress();
     };
-
-    // Khi user đóng hẳn app (trên một số trình duyệt)
-    const handleBeforeUnload = () => {
-        saveProgress();
-    };
-
     window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      // Lưu nốt lần cuối khi component bị hủy
       saveProgress();
     };
-  }, [userData]); // Re-bind khi có userData
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userData]);
 
   const maxBubbles = userData ? 2 + userData.energy_level : 3;
 
-  // --- INIT (Chỉ chạy 1 lần duy nhất) ---
+  // --- 2. INIT & LOAD DATA ---
   useEffect(() => {
     const init = async () => {
-      if (typeof window !== 'undefined') {
-        try {
+      try {
+        if (typeof window !== 'undefined') {
           const WebApp = (await import('@twa-dev/sdk')).default;
           webAppRef.current = WebApp;
           if (WebApp.initDataUnsafe.user) {
             WebApp.ready(); WebApp.expand(); WebApp.setHeaderColor('#1a1b26');
-            // Fetch data lần đầu tiên
-            await fetchData(WebApp.initDataUnsafe.user.id);
+            fetchData(WebApp.initDataUnsafe.user.id);
           } else {
             setLoading(false);
           }
-        } catch (e) { setLoading(false); }
-      }
+        }
+      } catch (e) { setLoading(false); }
     };
     init();
-  }, []);
 
-  // --- GAME LOOP & TIMER ---
-  useEffect(() => {
+    // --- GAME LOOP ---
     const gameLoop = setInterval(() => {
       const now = Date.now();
       
-      // 1. Logic Đếm ngược & Tỉnh dậy
+      // Timer Logic
       if (sleepUntil) {
         const diff = sleepUntil - now;
         if (diff <= 0) {
@@ -147,7 +121,6 @@ export default function Home() {
           setTimeRemaining("");
           webAppRef.current?.HapticFeedback.notificationOccurred('success');
         } else {
-          // FIX 3: Format hiển thị giờ:phút:giây (HH:MM:SS) cho thời gian dài
           const hours = Math.floor(diff / (1000 * 60 * 60));
           const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
           const seconds = Math.floor((diff % (1000 * 60)) / 1000);
@@ -155,12 +128,11 @@ export default function Home() {
           const hStr = hours > 0 ? `${hours}:` : '';
           const mStr = minutes < 10 ? `0${minutes}` : minutes;
           const sStr = seconds < 10 ? `0${seconds}` : seconds;
-          
           setTimeRemaining(`${hStr}${mStr}:${sStr}`);
         }
       }
 
-      // 2. Logic Spawn Bong Bóng (FIX 2: Safe Zone chuẩn xác hơn)
+      // Bubble Spawn Logic (Safe Zone)
       if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
         setBubbles(prev => {
           if (prev.length >= maxBubbles || isSleeping) return prev; 
@@ -168,24 +140,14 @@ export default function Home() {
           const side = Math.floor(Math.random() * 3);
           let spawnX, spawnY;
 
-          // Logic mới: Giới hạn % chặt hơn để tránh mép
-          // Lưu ý: CSS đã có translate(-50%, -50%) nên ta tính tâm
-          if (side === 0) { // CẠNH TRÊN (Top)
-             // X: Từ 20% đến 80% (Tránh 2 góc bo tròn tai thỏ)
+          if (side === 0) { // Top
              spawnX = 20 + Math.random() * 60; 
-             // Y: Từ 15% đến 25% (Tránh đè lên Header Coins)
              spawnY = 15 + Math.random() * 10; 
-          } 
-          else if (side === 1) { // CẠNH TRÁI (Left)
-             // X: Từ 15% đến 25% (Thụt vào sâu hơn hẳn)
+          } else if (side === 1) { // Left
              spawnX = 15 + Math.random() * 10;  
-             // Y: Từ 30% đến 60% (Khoảng giữa thân máy, tránh Header và Footer)
              spawnY = 30 + Math.random() * 30; 
-          } 
-          else { // CẠNH PHẢI (Right)
-             // X: Từ 75% đến 85% (Thụt vào sâu hơn hẳn)
-             spawnX = 75 + Math.random() * 10; 
-             // Y: Từ 30% đến 60%
+          } else { // Right
+             spawnX = 75 + Math.random() * 10;  
              spawnY = 30 + Math.random() * 30; 
           }
 
@@ -203,11 +165,26 @@ export default function Home() {
     const { data } = await supabase.from('users').select('*').eq('telegram_id', tid).single();
     if (data) {
       setUserData(data);
-      setCoins(data.coins); // FIX 4: Chỉ set coins lần đầu load app
-      // Cần logic load happiness/sleep từ DB nếu muốn persist (Tạm thời để local session)
+      setCoins(data.coins);
+
+      // --- LOGIC CHECK THỜI GIAN NGỦ TỪ DB ---
+      if (data.sleep_until) {
+        const sleepTime = new Date(data.sleep_until).getTime();
+        const now = Date.now();
+        
+        if (sleepTime > now) {
+          // Vẫn đang trong giờ ngủ -> Set lại state
+          setSleepUntil(sleepTime);
+          setHappiness(0); // Reset happiness
+        } else {
+          // Đã qua giờ ngủ -> Tỉnh dậy
+          setSleepUntil(null);
+        }
+      }
     }
     setLoading(false);
   };
+
   // --- ACTIONS ---
 
   const handlePopBubble = (id: number) => {
@@ -221,11 +198,9 @@ export default function Home() {
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
     setClicks(prev => [...prev, { id: Date.now(), x: window.innerWidth/2, y: window.innerHeight/2 }]);
 
-    // FIX 4: Cộng tiền Optimistic (Cục bộ)
     setCoins(prev => prev + reward);
-    triggerSync(reward); // Lưu ngầm
+    triggerSync(reward);
     
-    // FIX 3: Happiness giữ nguyên trong State (Không bị reset vì state nằm ở Home)
     if (happiness < MAX_HAPPINESS) {
       setHappiness(prev => Math.min(prev + 1, MAX_HAPPINESS));
     } 
@@ -235,17 +210,32 @@ export default function Home() {
     }
   };
 
-  const handleClaimBigGift = () => {
+  const handleClaimBigGift = async () => {
     const levelBonus = (userData?.click_level || 1) * 50;
     const bigReward = 200 + levelBonus;
     
+    // 1. Update UI (Optimistic)
     setCoins(prev => prev + bigReward);
-    triggerSync(bigReward);
-
     setHappiness(0);
-    setSleepUntil(Date.now() + SLEEP_DURATION_MS);
+    
+    // Tính thời gian dậy
+    const wakeUpTime = Date.now() + (SLEEP_MINUTES * 60 * 1000);
+    setSleepUntil(wakeUpTime);
     
     webAppRef.current?.HapticFeedback.notificationOccurred('success');
+
+    // 2. Gọi RPC lưu cả Tiền + Thời gian ngủ lên DB
+    if(userData) {
+      // Lưu ý: Đã có tiền thưởng trong hàm này nên không cần triggerSync nữa
+      // để tránh cộng đôi. Reset ref tạm.
+      unsavedCoinsRef.current = 0; 
+
+      await supabase.rpc('claim_happiness_gift', { 
+        p_user_id: userData.id, 
+        p_reward: bigReward,
+        p_sleep_minutes: SLEEP_MINUTES
+      });
+    }
   };
 
   const handleUpgrade = async (type: 'click' | 'energy', cost: number) => {
@@ -260,14 +250,12 @@ export default function Home() {
              }
          });
          webAppRef.current?.HapticFeedback.notificationOccurred('success');
-         // Với logic mua, nên gọi RPC ngay lập tức để trừ tiền chuẩn
          await supabase.rpc('buy_upgrade', { p_user_id: userData?.id, p_type: type });
      } else {
          webAppRef.current?.HapticFeedback.notificationOccurred('error');
      }
   };
 
-  // FIX 3: Chuyển Tab không ảnh hưởng Happiness/Coins (Vì state nằm ở Home cha)
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (tab === 'shop') setIsShopOpen(true);
@@ -276,6 +264,7 @@ export default function Home() {
 
   return (
     <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
+      <AssetPreloader />
       <ClickEffects clicks={clicks} />
 
       {/* HEADER */}
@@ -283,7 +272,7 @@ export default function Home() {
          <div className="flex flex-col gap-1 pointer-events-auto">
             <div className="relative pl-12 pr-6 py-3 bg-black/30 backdrop-blur-xl rounded-full border border-white/10 shadow-lg">
                 <div className="absolute -left-2 -top-2 w-16 h-16 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] animate-float">
-                    <Image src="/assets/icons/star-3d.webp" alt="Star" fill className="object-contain" />
+                    <Image src="/assets/icons/star-3d.png" alt="Star" fill className="object-contain" />
                 </div>
                 <div className="flex flex-col items-start justify-center leading-none">
                     <span className="text-[10px] text-yellow-200/80 font-bold uppercase tracking-widest mb-1">Stars</span>
@@ -306,21 +295,17 @@ export default function Home() {
              onInteractSuccess={handleInteractSuccess}
            />
         )}
-        {/* Placeholder cho các tab khác */}
         {activeTab === 'travel' && <div className="flex items-center justify-center h-full text-white/50">Travel Coming Soon</div>}
         {activeTab === 'profile' && <div className="flex items-center justify-center h-full text-white/50">Profile Coming Soon</div>}
       </main>
 
-      {/* HAPPINESS BAR (Có Timer) */}
+      {/* HAPPINESS BAR */}
       <div className="fixed bottom-28 left-6 right-6 z-30 pointer-events-none flex justify-center">
         <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: isSleeping ? 1 : 1 }}>
-            
             <div className="absolute -left-1 -top-4 w-14 h-14 z-20 drop-shadow-[0_4px_8px_rgba(244,114,182,0.5)]">
-                 <Image src="/assets/icons/heart-3d.webp" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
+                 <Image src="/assets/icons/heart-3d.png" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
             </div>
-
             <div className="w-full h-8 bg-[#12131c]/80 rounded-full border border-white/10 backdrop-blur-md overflow-hidden p-1 shadow-xl pl-12 relative">
-                {/* FIX 2: Hiển thị Timer */}
                 <div className="absolute inset-0 flex items-center justify-center z-10 text-xs font-bold text-white/90 drop-shadow-sm font-mono tracking-wider">
                     {isSleeping ? `Zzz... ${timeRemaining}` : `${happiness} / ${MAX_HAPPINESS} Happiness`}
                 </div>
