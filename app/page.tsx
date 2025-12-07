@@ -49,22 +49,29 @@ export default function Home() {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const saveProgress = async () => {
     const amount = unsavedCoinsRef.current;
-    if (!userData || amount === 0) return;
+    if (!userData) {
+        console.error("❌ Save failed: No User Data");
+        return;
+    }
+    if (amount === 0) return;
 
-    // Reset biến tạm ngay để tránh lưu trùng
-    unsavedCoinsRef.current = 0;
+    unsavedCoinsRef.current = 0; 
+    console.log(`🚀 Force saving: +${amount} coins for User ${userData.id}`);
     
-    console.log(`Force saving: +${amount} coins`);
-    
-    // Gọi RPC
     try {
-      await supabase.rpc('increment_coins', { 
-        row_id: userData.id, 
-        amount: amount 
+      // SỬA Ở ĐÂY: Tên tham số phải khớp với hàm SQL mới
+      const { data, error } = await supabase.rpc('increment_coins', { 
+        p_user_id: userData.id,  // Khớp với p_user_id
+        p_amount: amount         // Khớp với p_amount
       });
+
+      if (error) throw error;
+
+      console.log("✅ Saved successfully! New balance:", data);
+
     } catch (error) {
-      console.error("Save failed:", error);
-      // Nếu lỗi, trả lại tiền vào biến tạm để lần sau lưu tiếp
+      console.error("❌ Save CRITICAL ERROR:", error);
+      // Hoàn tiền lại nếu lỗi
       unsavedCoinsRef.current += amount; 
     }
   };
