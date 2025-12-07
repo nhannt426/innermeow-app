@@ -28,6 +28,8 @@ interface UserData {
 }
 
 export default function GameClient() {
+  const unsavedCoinsRef = useRef(0);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [activeTab, setActiveTab] = useState('home');
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,9 +53,6 @@ export default function GameClient() {
   const webAppRef = useRef<any>(null);
 
   // Sync Logic
-  const unsavedCoinsRef = useRef(0);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   const { playBgm, playEat, playSuccess, playPurr, playUi } = useGameSound();
 
   // Kích hoạt nhạc nền khi user tương tác lần đầu
