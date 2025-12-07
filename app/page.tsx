@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/utils/supabase/client'; // Import đúng (không dùng createClient)
+import { supabase } from '@/utils/supabase/client';
 import RoomScene from '@/components/game/RoomScene';
 import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
 import { Loader2, Zap, Gem, Settings } from 'lucide-react';
 
-// --- CONFIG ---
 const BASE_MAX_ENERGY = 500;
 
 interface UserData {
@@ -24,11 +23,9 @@ interface UserData {
 export default function Home() {
   const [activeTab, setActiveTab] = useState('home');
   const [userData, setUserData] = useState<UserData | null>(null);
-  
-  // Quan trọng: Logic Loading
   const [loading, setLoading] = useState(true);
   
-  // Local UI States
+  // UI States
   const [localCoins, setLocalCoins] = useState(0);
   const [localEnergy, setLocalEnergy] = useState(0);
   const [clicks, setClicks] = useState<{id: number, x: number, y: number, value: number}[]>([]);
@@ -38,32 +35,29 @@ export default function Home() {
   const pendingUpdatesRef = useRef({ coins: 0, energy: 0 });
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const webAppRef = useRef<any>(null);
+  const lastTapTimeRef = useRef<number>(0); // <--- MỚI: Biến chặn tap quá nhanh
 
-  // Derived Values (Tính toán dựa trên dữ liệu thật)
   const clickPower = userData ? userData.click_level : 1;
   const maxEnergy = userData ? userData.energy_level * 500 : 500;
 
   useEffect(() => {
     const initApp = async () => {
-      // Dù có lỗi hay không, cuối cùng cũng phải tắt loading để không bị treo
       try {
         if (typeof window !== 'undefined') {
           const WebApp = (await import('@twa-dev/sdk')).default;
           webAppRef.current = WebApp;
-          
           if (WebApp.initDataUnsafe.user) {
             WebApp.ready();
             WebApp.expand();
             WebApp.setHeaderColor('#1a1b26');
             await fetchUserData(WebApp.initDataUnsafe.user.id);
           } else {
-            console.log("Running in browser mode");
-            setLoading(false); // Browser mode -> Tắt loading
+            setLoading(false);
           }
         }
       } catch (e) {
         console.error("Init Error:", e);
-        setLoading(false); // Lỗi -> Tắt loading
+        setLoading(false);
       }
     };
     initApp();
@@ -71,44 +65,32 @@ export default function Home() {
 
   const fetchUserData = async (telegramId: number) => {
     try {
-      const { data, error } = await supabase.from('users').select('*').eq('telegram_id', telegramId).single();
-      
-      if (error) throw error;
-      
+      const { data } = await supabase.from('users').select('*').eq('telegram_id', telegramId).single();
       if (data) {
         setUserData(data);
         setLocalCoins(data.coins);
         setLocalEnergy(data.energy);
       }
-    } catch (err) {
-      console.error("Fetch User Error:", err);
     } finally {
-      setLoading(false); // Luôn tắt loading khi fetch xong
+      setLoading(false);
     }
   };
 
-  // --- MUA UPGRADE (LOGIC MỚI) ---
   const handleUpgrade = async (type: 'click' | 'energy', cost: number) => {
     if (!userData) return;
 
-    // 1. Gọi RPC Server (Chờ kết quả thật)
     const { data, error } = await supabase.rpc('buy_upgrade', {
         p_user_id: userData.id,
         p_type: type
     });
 
     if (error) {
-        console.error("RPC Error:", error);
         webAppRef.current?.HapticFeedback.notificationOccurred('error');
         return;
     }
 
-    // 2. Kiểm tra kết quả trả về từ SQL JSON
-    // data = { success: true, new_level: 5, coins_left: 100... }
     if (data && data.success) {
         webAppRef.current?.HapticFeedback.notificationOccurred('success');
-        
-        // Cập nhật State với dữ liệu mới từ Server trả về
         setUserData(prev => {
             if (!prev) return null;
             return {
@@ -118,22 +100,21 @@ export default function Home() {
                 energy_level: type === 'energy' ? data.new_level : prev.energy_level
             };
         });
-        
-        // Cập nhật UI ngay
         setLocalCoins(data.coins_left);
-        // Nếu nâng cấp Energy, server tự hồi đầy -> Cập nhật luôn
-        if (type === 'energy') {
-           setLocalEnergy(data.new_level * 500);
-        }
-
+        if (type === 'energy') setLocalEnergy(data.new_level * 500);
     } else {
-        // Trường hợp không đủ tiền hoặc lỗi logic
-        console.log("Upgrade failed:", data?.message);
         webAppRef.current?.HapticFeedback.notificationOccurred('warning');
     }
   };
 
   const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
+    // 1. THROTTLE: Chặn nếu tap quá nhanh (dưới 80ms)
+    const now = Date.now();
+    if (now - lastTapTimeRef.current < 80) {
+        return; // Bỏ qua tap này
+    }
+    lastTapTimeRef.current = now;
+
     if (localEnergy <= 0) {
         webAppRef.current?.HapticFeedback.notificationOccurred('error');
         return; 
@@ -142,12 +123,17 @@ export default function Home() {
     webAppRef.current?.HapticFeedback.impactOccurred('medium');
 
     let clientX, clientY;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
+    // Lấy tọa độ chuẩn xác hơn cho cả Touch và Mouse
+    if ('targetTouches' in e && (e as React.TouchEvent).targetTouches.length > 0) {
+      clientX = (e as React.TouchEvent).targetTouches[0].clientX;
+      clientY = (e as React.TouchEvent).targetTouches[0].clientY;
+    } else if ('clientX' in e) {
       clientX = (e as React.MouseEvent).clientX;
       clientY = (e as React.MouseEvent).clientY;
+    } else {
+       // Fallback giữa màn hình
+       clientX = window.innerWidth / 2;
+       clientY = window.innerHeight / 2;
     }
 
     const newClick = { id: Date.now(), x: clientX, y: clientY, value: clickPower };
@@ -176,25 +162,34 @@ export default function Home() {
   };
 
   const handleTabChange = (tab: string) => {
-    if (tab === 'brew') setIsShopOpen(true);
-    else setActiveTab(tab);
+    // FIX: Luôn cập nhật activeTab trước
+    setActiveTab(tab);
+
+    if (tab === 'brew') {
+        setIsShopOpen(true);
+    }
   }
 
-  // --- RENDER ---
+  // Khi đóng shop thì quay về home (tuỳ chọn)
+  const handleCloseShop = () => {
+      setIsShopOpen(false);
+      setActiveTab('home'); // Quay về home cho đỡ lấn cấn
+  }
+
   return (
     <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
       <ClickEffects clicks={clicks} />
 
       <ShopModal 
         isOpen={isShopOpen} 
-        onClose={() => setIsShopOpen(false)} 
+        onClose={handleCloseShop} 
         coins={localCoins}
         clickLevel={userData?.click_level || 1}
         energyLevel={userData?.energy_level || 1}
         onUpgrade={handleUpgrade}
       />
 
-      {/* Background */}
+      {/* Background Ambience */}
       <div className="absolute top-[-20%] left-[-20%] w-[500px] h-[500px] bg-game-primary/20 rounded-full blur-[120px]" />
       
       {/* Header */}
@@ -212,7 +207,6 @@ export default function Home() {
                 </div>
             </div>
          </div>
-         {/* Settings Button */}
          <button className="w-10 h-10 rounded-full bg-white/5 backdrop-blur-md flex items-center justify-center border border-white/10 pointer-events-auto hover:bg-white/10">
             <Settings size={20} className="text-white/70" />
          </button>
@@ -241,7 +235,6 @@ export default function Home() {
 
       <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
       
-      {/* Loading Overlay */}
       {loading && (
         <div className="fixed inset-0 bg-game-bg z-[100] flex flex-col items-center justify-center space-y-4">
             <Loader2 className="w-10 h-10 text-game-accent animate-spin" />

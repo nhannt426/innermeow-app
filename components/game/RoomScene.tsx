@@ -9,22 +9,24 @@ interface RoomSceneProps {
 }
 
 export default function RoomScene({ onTap }: RoomSceneProps) {
-  // State xử lý hiệu ứng nhún khi click
   const [isPressed, setIsPressed] = useState(false);
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    // Ngăn chặn sự kiện nổi bọt để tránh kích hoạt double trên một số máy
+    e.preventDefault(); 
     setIsPressed(true);
     onTap(e);
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
     setIsPressed(false);
   };
 
   return (
     <div className="relative w-full h-[65vh] flex items-center justify-center select-none touch-none">
       
-      {/* 1. Floating Island (Background - Không nhận click) */}
+      {/* 1. Background (Floating Island) */}
       <motion.div 
         initial={{ opacity: 0, scale: 0.8, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -42,29 +44,33 @@ export default function RoomScene({ onTap }: RoomSceneProps) {
         />
       </motion.div>
 
-      {/* 2. The Cat (Nhận Click/Tap ở đây) */}
+      {/* 2. Con Mèo (Tương tác Vật lý Đầm tay) */}
       <motion.div
         className="absolute z-10 mb-[-40px] cursor-pointer"
         animate={{ 
-          y: isPressed ? 10 : [0, -8, 0], // Nếu đang ấn thì thụt xuống, không thì bay
-          scale: isPressed ? 0.95 : 1
+          // Khi ấn: Lún xuống 15px (sâu hơn), co lại 90% -> Cảm giác lực mạnh
+          y: isPressed ? 15 : [0, -8, 0], 
+          scale: isPressed ? 0.92 : 1 
         }}
         transition={{ 
-          y: { duration: isPressed ? 0.1 : 4, repeat: isPressed ? 0 : Infinity, ease: "easeInOut" },
-          scale: { duration: 0.1 }
+          // Cấu hình lò xo "Đầm" (Damping cao để giảm rung lắc)
+          type: "spring",
+          stiffness: 400, // Độ cứng lò xo
+          damping: 25,    // Độ hãm (càng cao càng ít tưng)
+          mass: 1.2       // Trọng lượng (nặng hơn xíu)
         }}
-        // Hỗ trợ cả chuột và màn hình cảm ứng
-        onMouseDown={handlePointerDown}
-        onMouseUp={handlePointerUp}
-        onTouchStart={handlePointerDown}
-        onTouchEnd={handlePointerUp}
+        // Sự kiện Pointer bao gồm cả Mouse và Touch, xử lý triệt để hơn
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp} // Nếu trượt tay ra ngoài thì cũng nhả ra
       >
         <Image 
           src="/assets/cat-idle.png" 
           alt="My Inner Meow" 
           width={160} 
           height={160}
-          className="object-contain drop-shadow-xl pointer-events-auto" // Quan trọng: pointer-events-auto
+          className="object-contain drop-shadow-xl pointer-events-auto"
+          draggable={false} // Cấm kéo ảnh
         />
       </motion.div>
     </div>
