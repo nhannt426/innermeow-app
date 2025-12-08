@@ -8,7 +8,9 @@ import { useGameSound } from '@/hooks/useGameSound';
 
 interface RoomSceneProps {
   userLevel: number;
-  onInteractSuccess: (reward: number, type: string) => void;
+  sanctuaryLevel: number;
+  // UPDATE: Thêm x, y vào callback
+  onInteractSuccess: (reward: number, type: string, x: number, y: number) => void;
   bubbles: { id: number; x: number; y: number }[];
   onPopBubble: (id: number) => void;
 }
@@ -19,10 +21,11 @@ interface DroppedItem extends GameItem {
   y: number;
 }
 
-export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
+export default function RoomScene({ userLevel, sanctuaryLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
   const [droppedItems, setDroppedItems] = useState<DroppedItem[]>([]);
   const catRef = useRef<HTMLDivElement>(null);
   const { playPop, playDrop } = useGameSound();
+  const bgImageSrc = `/assets/backgrounds/bg-level-${sanctuaryLevel}.webp`;
 
   const handleBubbleClick = (id: number, x: number, y: number) => {
     playPop();
@@ -43,25 +46,28 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
 
   const handleDragEnd = (event: any, info: any, item: DroppedItem) => {
     const catRect = catRef.current?.getBoundingClientRect();
-    const dropX = info.point.x;
-    const dropY = info.point.y;
+    
+    // Lấy tọa độ thả chuột thực tế từ event
+    // clientX/Y là vị trí ngón tay/chuột trên màn hình
+    const dropX = event.clientX || info.point.x; 
+    const dropY = event.clientY || info.point.y;
 
     if (catRect) {
-      // Hitbox rộng hơn chút để dễ trúng
       if (
         dropX >= catRect.left - 30 && 
         dropX <= catRect.right + 30 && 
         dropY >= catRect.top - 30 && 
         dropY <= catRect.bottom + 30
       ) {       
-        handleItemConsumed(item);
+        // UPDATE: Truyền tọa độ dropX, dropY lên trên
+        handleItemConsumed(item, dropX, dropY);
       }
     }
   };
 
-  const handleItemConsumed = (item: DroppedItem) => {
+  const handleItemConsumed = (item: DroppedItem, x: number, y: number) => {
     setDroppedItems(prev => prev.filter(i => i.instanceId !== item.instanceId));
-    onInteractSuccess(item.reward, item.type);
+    onInteractSuccess(item.reward, item.type, x, y);
   };
 
   return (
@@ -69,12 +75,27 @@ export default function RoomScene({ userLevel, onInteractSuccess, bubbles, onPop
       
       {/* Background (Dùng Next Image ok vì nó tĩnh) */}
       <motion.div 
-        animate={{ y: [0, -10, 0] }}
-        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+        // Thêm key để React biết phải render lại khi đổi ảnh (tạo hiệu ứng chuyển cảnh mượt nếu muốn)
+        key={sanctuaryLevel} 
+        initial={{ opacity: 0 }}
+        animate={{ y: [0, -10, 0], opacity: 1 }}
+        transition={{ 
+            y: { duration: 6, repeat: Infinity, ease: "easeInOut" },
+            opacity: { duration: 1 } // Fade in khi đổi nhà
+        }}
         className="relative w-[360px] h-[360px] flex items-center justify-center pointer-events-none"
       >
         <div className="absolute w-[220px] h-[220px] bg-game-primary/20 rounded-full blur-[80px]" />
-        <Image src="/assets/bg-room.webp" alt="Room" width={380} height={380} className="object-contain drop-shadow-2xl z-0" priority />
+        
+        {/* Dùng biến bgImageSrc */}
+        <Image 
+            src={bgImageSrc} 
+            alt={`Sanctuary Level ${sanctuaryLevel}`} 
+            width={380} 
+            height={380} 
+            className="object-contain drop-shadow-2xl z-0" 
+            priority 
+        />
       </motion.div>
 
       {/* Cat (Drop Zone) */}
