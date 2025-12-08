@@ -50,7 +50,7 @@ export default function ShopModal({
           />
           <motion.div
             initial={{ y: '100%' }} animate={{ y: '10%' }} exit={{ y: '100%' }}
-            transition={{ type: "spring", damping: 25, stiffness: 400 }}
+            transition={{ type: "tween", duration: 0.3, ease: "easeOut" }}
             className="fixed inset-x-0 bottom-0 h-[85%] bg-[#1e1f2e] border-t border-white/10 rounded-t-[40px] z-[100] p-6 shadow-2xl flex flex-col"
           >
             {/* Header & Tabs */}

@@ -16,6 +16,9 @@ import AssetPreloader from '@/components/ui/AssetPreloader';
 import FloatingNumbers, { FloatingText } from '@/components/ui/FloatingNumbers';
 import RewardModal from '@/components/game/RewardModal';
 import Toast from '@/components/ui/Toast';
+import { TRAVEL_MAPS, getRandomTravelDrop } from '@/constants/travelData';
+import TravelMenu from '@/components/game/TravelMenu';
+import TravelScene from '@/components/game/TravelScene';
 
 // --- 1. CONFIGURATION ---
 const BASE_MAX_HAPPINESS = 10;
@@ -39,6 +42,7 @@ interface UserData {
   buff_wealth: number;
   buff_luck: number;
   inventory_coffee: number;
+  memory_dust: number;
 }
 
 export default function GameClient() {
@@ -79,7 +83,111 @@ export default function GameClient() {
 
   const [rewardModalOpen, setRewardModalOpen] = useState(false); // State bật tắt modal
   const [rewardsData, setRewardsData] = useState<string[]>([]); // Data phần thưởng
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  // Thêm State quản lý Travel
+  const [currentMap, setCurrentMap] = useState<string | null>(null); // Đang ở map nào? (null = ở nhà)
+  const [collectionData, setCollectionData] = useState<any[]>([]); // Data tiến độ sưu tập
+
+  const [currentMapId, setCurrentMapId] = useState<string | null>(null);
   // --- 3. HELPER FUNCTIONS (SYNC & LOGIC) ---
+  const handleStartTravel = async (mapId: string) => {
+     if (!userData || userData.ticket_count <= 0) {
+         showToast("No tickets left!", "error");
+         return;
+     }
+
+     // 1. Trừ vé ở Client (Visual)
+     setUserData(prev => prev ? ({ ...prev, ticket_count: prev.ticket_count - 1 }) : null);
+     
+     // 2. Chuyển cảnh
+     setCurrentMapId(mapId);
+     setActiveTab('travel_scene'); // Tab ảo để render scene
+     
+     // 3. Update Server (Trừ vé trong DB)
+     // Bạn nên viết RPC 'use_ticket' hoặc update trực tiếp
+     await supabase.from('users').update({ ticket_count: userData.ticket_count - 1 }).eq('id', userData.id);
+  };
+
+  // LOGIC: Thoát Travel
+  const handleExitTravel = () => {
+     setCurrentMapId(null);
+     setActiveTab('travel'); // Quay về menu chọn map
+     // Tắt âm thanh Travel đã được xử lý trong useEffect của TravelScene
+     playBgm(); // Bật lại nhạc nền chính
+  };
+  const handleBubbleClickWrapper = (id: number) => {
+      // Tìm bong bóng để lấy tọa độ (cho effect)
+      const bubble = bubbles.find(b => b.id === id);
+      const x = bubble?.x || 50;
+      const y = bubble?.y || 50;
+      
+      handlePopBubble(id); // Xóa bong bóng & Haptic
+
+      if (currentMapId) {
+          // --- LOGIC TRAVEL ---
+          handleTravelDrop(x, y);
+      } else {
+          // --- LOGIC NHÀ (Cũ) ---
+          // Random reward cũ
+          const baseReward = Math.floor(Math.random() * (20 - 5 + 1)) + 5; 
+          handleInteractSuccess(baseReward, 'coin', x, y);
+      }
+  };
+
+  // LOGIC MỚI: Rớt đồ khi Travel
+  const handleTravelDrop = async (x: number, y: number) => {
+      if (!currentMapId) return;
+
+      // 1. Random Item từ config
+      const dropItem = getRandomTravelDrop(currentMapId);
+      if (!dropItem) return; // Không rớt gì
+
+      // 2. Gọi Server (RPC collect_fragment)
+      // (Giữ nguyên logic gọi API như cũ) ...
+      const { data } = await supabase.rpc('collect_fragment', {
+          p_user_id: userData?.id,
+          p_map_id: currentMapId,
+          p_item_id: dropItem.id,
+          p_max_fragments: dropItem.fragmentsRequired
+      });
+
+      // 3. XỬ LÝ HIỆU ỨNG BAY (FLOATING EFFECT)
+      const textId = `${Date.now()}-${Math.random()}`;
+
+      if (data && data.status === 'dust') {
+          // A. TRƯỜNG HỢP RA BỤI (DUPLICATE)
+          // Hiện ảnh Bụi Ký Ức
+          setFloatingTexts(prev => [...prev, {
+             id: textId, x, y,
+             value: `+${data.amount}`,
+             type: 'fragment',
+             imgSrc: '/assets/icons/memory-dust.webp' // Ảnh bụi
+          }]);
+          
+          // Update data
+          setUserData(prev => prev ? ({ ...prev, memory_dust: (prev.memory_dust || 0) + data.amount }) : null);
+
+      } else {
+          // B. TRƯỜNG HỢP RA MẢNH GHÉP (NEW FRAGMENT)
+          // Hiện ảnh của chính Item đó
+          setFloatingTexts(prev => [...prev, {
+             id: textId, x, y,
+             value: '+1', // Text hiển thị kèm
+             type: 'fragment', // Type mới
+             imgSrc: `/assets/travel/items/${currentMapId}/item-${dropItem.id}.webp`
+          }]);
+          
+          // (Optional) Toast báo tên item cho rõ
+          // showToast(`Found ${dropItem.name} piece!`, 'success');
+      }
+
+      // Xóa effect sau 1s
+      setTimeout(() => setFloatingTexts(prev => prev.filter(t => t.id !== textId)), 1000);
+
+      // Tăng Happiness
+      if (happiness < maxHappiness) setHappiness(prev => prev + 1);
+  };
+  
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'success' | 'error' }>({ 
       show: false, msg: '', type: 'success' 
   });
@@ -462,10 +570,20 @@ export default function GameClient() {
   };
 
   const handleTabChange = (tab: string) => {
-    playUi(); 
+    playUi();
+    if (tab === 'travel') {
+        setActiveTab('travel');
+        setIsShopOpen(false);
+        setIsInventoryOpen(false);
+        return;
+    }
     setActiveTab(tab);
-    if (tab === 'inventory') setHasNewItems(false);
+    // Logic mới: Tab nào là Modal thì bật state lên
     setIsShopOpen(tab === 'shop');
+    setIsInventoryOpen(tab === 'inventory');
+    
+    // Tắt noti nếu vào kho
+    if (tab === 'inventory') setHasNewItems(false);
   };
 
   // --- 8. RENDER ---
@@ -538,21 +656,26 @@ export default function GameClient() {
              userLevel={userData?.click_level || 1}
              sanctuaryLevel={userData?.sanctuary_level || 1}
              bubbles={bubbles}
-             onPopBubble={handlePopBubble}
+             onPopBubble={handleBubbleClickWrapper}
              onInteractSuccess={handleInteractSuccess}
            />
         )}
-        {/* ✅ NEW: Tab Inventory */}
-        {activeTab === 'inventory' && userData && (
-           <InventoryView 
+        {activeTab === 'travel' && userData && (
+           <TravelMenu 
               ticketCount={userData.ticket_count}
-              coffeeCount={userData.inventory_coffee}
-              buffWealth={userData.buff_wealth}
-              buffLuck={userData.buff_luck}
-              isSleeping={isSleeping}
-              onUseCoffee={handleUseInventoryCoffee}
+              onTravel={handleStartTravel}
            />
         )}
+
+        {/* CASE 3: TRAVEL SCENE (GAMEPLAY) */}
+        {activeTab === 'travel_scene' && currentMapId && (
+            <TravelScene 
+                mapId={currentMapId}
+                bubbles={bubbles}
+                onPopBubble={handleBubbleClickWrapper}
+                onExit={handleExitTravel}
+            />
+        )}    
         {activeTab === 'profile' && <div className="flex items-center justify-center h-full text-white/50">Profile Coming Soon</div>}
       </main>
 
@@ -586,6 +709,18 @@ export default function GameClient() {
        isSleeping={isSleeping}
        onUpgrade={handleShopAction} 
        />
+      {userData && (
+        <InventoryView 
+          isOpen={isInventoryOpen} // Truyền state mở
+          onClose={() => { setIsInventoryOpen(false); setActiveTab('home'); }} // Đóng thì về Home
+          ticketCount={userData.ticket_count}
+          coffeeCount={userData.inventory_coffee}
+          buffWealth={userData.buff_wealth}
+          buffLuck={userData.buff_luck}
+          isSleeping={isSleeping}
+          onUseCoffee={handleUseInventoryCoffee}
+        />
+      )}
       <RewardModal 
           isOpen={rewardModalOpen} 
           rewards={rewardsData} 
