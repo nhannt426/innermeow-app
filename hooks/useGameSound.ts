@@ -19,7 +19,15 @@ export const useGameSound = () => {
   const [playEat] = useSound('/sounds/eat.mp3', { volume: 0.8, interrupt: true });
   
   // 5. PURR: Tiếng sướng (Tăng volume)
-  const [playPurr] = useSound('/sounds/purr.mp3', { volume: 1.0, interrupt: true });
+  const [playPurrStart, { stop: stopPurr }] = useSound('/sounds/purr.mp3', { 
+    volume: 0.8, 
+    loop: true, // <-- Quan trọng: Loop liên tục
+    html5: true, // Nên dùng html5 cho audio dài
+    interrupt: false
+  });
+
+  // Wrapper để gọi play
+  const playPurr = () => playPurrStart();
   
   // 6. SUCCESS: Tiếng tiền về
   const [playSuccess] = useSound('/sounds/success.mp3', { volume: 0.6, interrupt: true });
@@ -37,6 +45,7 @@ export const useGameSound = () => {
     playDrop,
     playEat,
     playPurr,
+    stopPurr,
     playSuccess,
     playUi
   };

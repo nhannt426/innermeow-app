@@ -1,30 +1,33 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Sparkles, X, Lock, ArrowUpCircle } from 'lucide-react';
-import { useGameSound } from '@/hooks/useGameSound';
+import { Heart, Sparkles, X, Lock } from 'lucide-react';
+import { useGameSound } from '@/hooks/useGameSound'; // Import Hook
 
 interface ShopModalProps {
   isOpen: boolean;
   onClose: () => void;
   coins: number;
-  clickLevel: number; // Tương ứng Affection Level
-  energyLevel: number; // Tương ứng Bubble Rate
+  clickLevel: number;
+  energyLevel: number;
   onUpgrade: (type: 'click' | 'energy', cost: number) => void;
 }
 
 const calculateCost = (level: number) => Math.floor(100 * Math.pow(1.5, level));
 const MAX_LEVEL = 20;
-const { playUi } = useGameSound();
 
 export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLevel, onUpgrade }: ShopModalProps) {
+  // ✅ FIX: Gọi Hook Ở TRONG Component (Không được để ngoài)
+  const { playUi } = useGameSound();
+
   return (
     <AnimatePresence>
       {isOpen && (
         <>
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={onClose} className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+            onClick={() => { playUi(); onClose(); }} // Click backdrop cũng có tiếng
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
           />
           <motion.div
             initial={{ y: '100%' }} animate={{ y: '10%' }} exit={{ y: '100%' }}
@@ -37,16 +40,17 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
                 <h2 className="text-3xl font-black text-white">Magic Shop</h2>
                 <p className="text-sm text-slate-400">Make your cat happier</p>
               </div>
-              <button onClick={onClose} className="p-3 bg-white/5 rounded-full hover:bg-white/10">
+              <button 
+                onClick={() => { playUi(); onClose(); }} // Thêm âm thanh đóng
+                className="p-3 bg-white/5 rounded-full hover:bg-white/10"
+              >
                 <X size={20} className="text-white" />
               </button>
             </div>
 
             {/* Upgrades List */}
             <div className="space-y-4 pb-24 overflow-y-auto h-full">
-              {/* Item 1: Better Gifts (Thay cho Click Power) */}
               <UpgradeItem 
-                onClick={() => playUi()}
                 id="click"
                 name="Better Gifts"
                 desc="Get more shards when cat is happy"
@@ -55,12 +59,13 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
                 bg="bg-pink-500/20"
                 level={clickLevel}
                 coins={coins}
-                onBuy={onUpgrade}
+                onBuy={(type, cost) => {
+                    playUi(); // Kêu tiếng click trước
+                    onUpgrade(type, cost);
+                }}
               />
               
-              {/* Item 2: More Bubbles (Thay cho Energy) */}
               <UpgradeItem 
-                onClick={() => playUi()}
                 id="energy"
                 name="Dream Bubbles"
                 desc="Bubbles appear more often"
@@ -69,7 +74,10 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
                 bg="bg-cyan-500/20"
                 level={energyLevel}
                 coins={coins}
-                onBuy={onUpgrade}
+                onBuy={(type, cost) => {
+                    playUi(); // Kêu tiếng click trước
+                    onUpgrade(type, cost);
+                }}
               />
             </div>
           </motion.div>
@@ -79,8 +87,21 @@ export default function ShopModal({ isOpen, onClose, coins, clickLevel, energyLe
   );
 }
 
-// Sub-component cho gọn
-function UpgradeItem({ id, name, desc, icon: Icon, color, bg, level, coins, onBuy }: any) {
+// Sub-component
+// Lưu ý: Đã xóa props 'onClick' thừa thãi, chỉ giữ lại props cần thiết
+interface UpgradeItemProps {
+    id: 'click' | 'energy';
+    name: string;
+    desc: string;
+    icon: any;
+    color: string;
+    bg: string;
+    level: number;
+    coins: number;
+    onBuy: (id: 'click' | 'energy', cost: number) => void;
+}
+
+function UpgradeItem({ id, name, desc, icon: Icon, color, bg, level, coins, onBuy }: UpgradeItemProps) {
   const cost = calculateCost(level);
   const isMaxed = level >= MAX_LEVEL;
   const canAfford = coins >= cost;
