@@ -3,20 +3,26 @@
 import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/utils/supabase/client';
+import { Loader2 } from 'lucide-react';
+import { useGameSound } from '@/hooks/useGameSound';
+import InventoryView from '@/components/game/InventoryView';
+
+// Components
 import RoomScene from '@/components/game/RoomScene';
 import Navigation from '@/components/ui/Navigation';
 import ClickEffects from '@/components/ui/ClickEffects';
 import ShopModal from '@/components/game/ShopModal';
 import AssetPreloader from '@/components/ui/AssetPreloader';
-import { Loader2 } from 'lucide-react';
-import { useGameSound } from '@/hooks/useGameSound';
 import FloatingNumbers, { FloatingText } from '@/components/ui/FloatingNumbers';
+import RewardModal from '@/components/game/RewardModal';
+import Toast from '@/components/ui/Toast';
 
-// --- CONFIG ---
-const BASE_MAX_HAPPINESS = 10; 
-const BUBBLE_GEN_RATE_MS = 3000; 
-const SLEEP_MINUTES = 240; 
-const SCREEN_BUBBLE_LIMIT = 6; 
+// --- 1. CONFIGURATION ---
+const BASE_MAX_HAPPINESS = 10;
+const BUBBLE_GEN_RATE_MS = 3000;
+const SCREEN_BUBBLE_LIMIT = 6;
+const DIGESTION_RATE_AWAKE_MS = 20 * 60 * 1000; // 20 phút
+const DIGESTION_RATE_SLEEP_MS = 10 * 60 * 1000; // 10 phút
 
 interface UserData {
   id: string;
@@ -27,70 +33,83 @@ interface UserData {
   energy_level: number;
   sanctuary_level: number;
   sleep_until: string | null;
+  ticket_count: number;
+  tickets_bought_today: number;
+  coffee_buy_count: number;
+  buff_wealth: number;
+  buff_luck: number;
+  inventory_coffee: number;
 }
 
 export default function GameClient() {
-  const unsavedCoinsRef = useRef(0);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [activeTab, setActiveTab] = useState('home');
+  // --- 2. STATE & REFS ---
+  
+  // Data State
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // --- GAME STATES ---
   const [coins, setCoins] = useState(0);
   const [happiness, setHappiness] = useState(0);
-  
-  // ✅ LOGIC: Max Happiness tăng theo Level (Mind Space)
-  const maxHappiness = userData ? BASE_MAX_HAPPINESS + (userData.energy_level - 1) : BASE_MAX_HAPPINESS;
-  
-  // Sleep Logic
+
+  // Game Logic State
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
   const [timeRemaining, setTimeRemaining] = useState("");
+  const [bubbles, setBubbles] = useState<{ id: number; x: number; y: number }[]>([]);
+  
+  // UI State
+  const [activeTab, setActiveTab] = useState('home');
+  const [isShopOpen, setIsShopOpen] = useState(false);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const [clicks, setClicks] = useState<any[]>([]);
+
+  // Refs
+  const unsavedCoinsRef = useRef(0);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastDigestionTimeRef = useRef<number>(Date.now());
+  const lastBubbleTimeRef = useRef<number>(Date.now());
+  const webAppRef = useRef<any>(null);
+
+  // Calculated Values
+  const maxHappiness = userData ? BASE_MAX_HAPPINESS + userData.energy_level : BASE_MAX_HAPPINESS;
   const isSleeping = sleepUntil ? Date.now() < sleepUntil : false;
 
-  // Bubble Logic
-  const [bubbles, setBubbles] = useState<{id: number, x: number, y: number}[]>([]);
-  const lastBubbleTimeRef = useRef<number>(Date.now());
-
-  // ✅ STATE MỚI: QUẢN LÝ SỐ NỔI
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-
-  // UI & Sounds
-  const [clicks, setClicks] = useState<any[]>([]);
-  const [isShopOpen, setIsShopOpen] = useState(false);
-  const webAppRef = useRef<any>(null);
+  // Custom Hooks
   const { playBgm, playEat, playSuccess, playPurr, stopPurr, playUi } = useGameSound();
 
-  // BGM Autoplay
-  useEffect(() => {
-    const handleUserInteraction = () => {
-      playBgm();
-      window.removeEventListener('click', handleUserInteraction);
-      window.removeEventListener('touchstart', handleUserInteraction);
-    };
-    window.addEventListener('click', handleUserInteraction);
-    window.addEventListener('touchstart', handleUserInteraction);
-    return () => {
-        window.removeEventListener('click', handleUserInteraction);
-        window.removeEventListener('touchstart', handleUserInteraction);
-    };
-  }, [playBgm]);
+  const [hasNewItems, setHasNewItems] = useState(false);
 
-  // Purr Logic
-  useEffect(() => {
-    if (isSleeping) playPurr();
-    else stopPurr();
-    return () => { stopPurr(); };
-  }, [isSleeping, playPurr, stopPurr]);
+  const [rewardModalOpen, setRewardModalOpen] = useState(false); // State bật tắt modal
+  const [rewardsData, setRewardsData] = useState<string[]>([]); // Data phần thưởng
+  // --- 3. HELPER FUNCTIONS (SYNC & LOGIC) ---
+  const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'success' | 'error' }>({ 
+      show: false, msg: '', type: 'success' 
+  });
 
-  // Save Logic
+  // Hàm helper để gọi Toast nhanh gọn
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+      setToast({ show: true, msg, type });
+  };
+
+  const handleUseInventoryCoffee = async () => {
+      if (!userData || userData.inventory_coffee <= 0 || !isSleeping) return;
+      
+      // Trừ Client
+      setUserData(prev => prev ? ({ ...prev, inventory_coffee: prev.inventory_coffee - 1 }) : null);
+      handleWakeUp(); // Đánh thức
+      
+      // Gọi Server (Bạn cần đảm bảo có hàm RPC tương ứng hoặc update trực tiếp)
+      // Tạm thời update visual client trước cho mượt
+      await supabase.rpc('use_inventory_coffee', { p_user_id: userData.id }); 
+  };
+
   const saveProgress = async () => {
     const amount = unsavedCoinsRef.current;
     if (!userData || amount === 0) return;
     unsavedCoinsRef.current = 0;
     try {
       await supabase.rpc('increment_coins', { p_user_id: userData.id, p_amount: amount });
-    } catch (error) { unsavedCoinsRef.current += amount; }
+    } catch (error) {
+      unsavedCoinsRef.current += amount; // Revert if failed
+    }
   };
 
   const triggerSync = (amountToAdd: number) => {
@@ -99,95 +118,12 @@ export default function GameClient() {
     syncTimeoutRef.current = setTimeout(() => saveProgress(), 1000);
   };
 
-  useEffect(() => {
-    const handleVisibilityChange = () => { if (document.visibilityState === 'hidden') saveProgress(); };
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => { window.removeEventListener('visibilitychange', handleVisibilityChange); saveProgress(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userData]);
-
-  // Init Data
-  useEffect(() => {
-    const init = async () => {
-      try {
-        if (typeof window !== 'undefined') {
-          // MOCK DATA FOR DEV
-          if (process.env.NODE_ENV === 'development') {
-             console.log("⚠️ Running in DEV mode - Mocking User Data");
-             // 👇 ID của bạn để test local
-             const MY_TELEGRAM_ID = 2101221512; 
-             await fetchData(MY_TELEGRAM_ID);
-             return; 
-          }
-
-          const WebApp = (await import('@twa-dev/sdk')).default;
-          webAppRef.current = WebApp;
-          if (WebApp.initDataUnsafe.user) {
-            WebApp.ready(); WebApp.expand(); WebApp.setHeaderColor('#1a1b26');
-            fetchData(WebApp.initDataUnsafe.user.id);
-          } else { setLoading(false); }
-        }
-      } catch (e) { console.error("Init Error:", e); setLoading(false); }
-    };
-    init();
-
-    // Game Loop
-    const gameLoop = setInterval(() => {
-      const now = Date.now();
-      
-      // Timer Logic
-      if (sleepUntil) {
-        const diff = sleepUntil - now;
-        if (diff <= 0) {
-          setSleepUntil(null);
-          setTimeRemaining("");
-          webAppRef.current?.HapticFeedback.notificationOccurred('success');
-        } else {
-          const hours = Math.floor(diff / (1000 * 60 * 60));
-          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-          const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-          const hStr = hours > 0 ? `${hours}:` : '';
-          const mStr = minutes < 10 ? `0${minutes}` : minutes;
-          const sStr = seconds < 10 ? `0${seconds}` : seconds;
-          setTimeRemaining(`${hStr}${mStr}:${sStr}`);
-        }
-      }
-
-      // Bubble Spawn Logic (Dynamic Cap)
-      if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
-        setBubbles(prev => {
-          if (isSleeping) return prev;
-
-          // Tính giới hạn động: Mèo càng no, bóng ra càng ít
-          const remainingHappinessSlots = maxHappiness - happiness;
-          const currentDynamicCap = Math.min(SCREEN_BUBBLE_LIMIT, remainingHappinessSlots + 1);
-
-          if (prev.length >= currentDynamicCap) return prev;
-          
-          const side = Math.floor(Math.random() * 3);
-          let spawnX, spawnY;
-          if (side === 0) { // Top
-             spawnX = 20 + Math.random() * 60; spawnY = 15 + Math.random() * 10; 
-          } else if (side === 1) { // Left
-             spawnX = 15 + Math.random() * 10; spawnY = 30 + Math.random() * 30; 
-          } else { // Right
-             spawnX = 75 + Math.random() * 10; spawnY = 30 + Math.random() * 30; 
-          }
-
-          lastBubbleTimeRef.current = now; 
-          return [...prev, { id: now, x: spawnX, y: spawnY }];
-        });
-      }
-    }, 1000);
-
-    return () => clearInterval(gameLoop);
-  }, [maxHappiness, happiness, sleepUntil, isSleeping]); 
-
   const fetchData = async (tid: number) => {
     const { data } = await supabase.from('users').select('*').eq('telegram_id', tid).single();
     if (data) {
       setUserData(data);
       setCoins(data.coins);
+      // Check sleep status
       if (data.sleep_until) {
         const sleepTime = new Date(data.sleep_until).getTime();
         if (sleepTime > Date.now()) {
@@ -201,155 +137,349 @@ export default function GameClient() {
     setLoading(false);
   };
 
-  const handlePopBubble = (id: number) => {
-    setBubbles(prev => prev.filter(b => b.id !== id));
-    webAppRef.current?.HapticFeedback.impactOccurred('light');
+  const handleWakeUp = () => {
+    setSleepUntil(null);
+    setTimeRemaining("");
+    setHappiness(0);
+    stopPurr();
+    webAppRef.current?.HapticFeedback.notificationOccurred('success');
+    
+    // Sync to DB
+    if (userData) {
+      supabase.from('users').update({ sleep_until: null }).eq('id', userData.id).then();
+    }
+  };
+
+  // --- 4. GAMEPLAY HANDLERS ---
+
+  const handleClaimBigGift = async () => {
+    const bonusReward = 100 + (userData?.sanctuary_level || 1) * 20;
+    
+    // Update Client
+    setCoins(prev => prev + bonusReward);
+    setHappiness(0);
+    
+    // Sleep Logic: 1 Happiness = 10 mins
+    const sleepDurationMs = maxHappiness * 10 * 60 * 1000;
+    const wakeUpTime = Date.now() + sleepDurationMs;
+    setSleepUntil(wakeUpTime);
+
+    // Effects
+    playSuccess();
+    webAppRef.current?.HapticFeedback.notificationOccurred('success');
+    
+    // Floating Bonus Text
+    const textId = `${Date.now()}-${Math.random()}`;
+    setFloatingTexts(prev => [...prev, { 
+        id: textId, value: bonusReward, x: window.innerWidth / 2, y: window.innerHeight - 150, type: 'bonus' 
+    }]);
+    setTimeout(() => setFloatingTexts(prev => prev.filter(t => t.id !== textId)), 1500);
+
+    // Sync DB
+    if (userData) {
+      unsavedCoinsRef.current = 0;
+      await supabase.rpc('claim_happiness_gift', { 
+        p_user_id: userData.id, 
+        p_reward: bonusReward, 
+        p_sleep_minutes: maxHappiness * 10 // Store minutes
+      });
+    }
   };
 
   const handleInteractSuccess = (reward: number, type: string, x: number, y: number) => {
     if (isSleeping) return;
 
-    // 1. Âm thanh
+    // 1. Wealth Buff Logic
+    let finalReward = reward;
+    const hasWealthBuff = (userData?.buff_wealth || 0) > 0;
+    if (hasWealthBuff) {
+      finalReward = reward * 2;
+      setUserData(prev => prev ? ({ ...prev, buff_wealth: Math.max(0, prev.buff_wealth - 1) }) : null);
+    }
+
+    // 2. Add Coins & Sync
+    setCoins(prev => prev + finalReward);
+    triggerSync(finalReward);
+
+    // 3. Effects
     playEat();
     setTimeout(() => { playSuccess(); webAppRef.current?.HapticFeedback.notificationOccurred('success'); }, 500);
-    
-    // 2. Click Effect (Vòng tròn lan tỏa)
-    setClicks(prev => [...prev, { id: Date.now(), x, y }]); // Dùng tọa độ thật
-    
-    // 3. ✅ FLOATING TEXT EFFECT (Số tiền bay lên)
-    const textId = `${Date.now()}-${Math.random()}`; 
+    setClicks(prev => [...prev, { id: Date.now(), x, y }]);
 
-    setFloatingTexts(prev => [...prev, { id: textId, value: reward, x, y, type: 'normal' }]);
-    
-    setTimeout(() => {
-        setFloatingTexts(prev => prev.filter(t => t.id !== textId));
-    }, 1000);
-
-    // 4. Logic cộng tiền
-    setCoins(prev => prev + reward);
-    triggerSync(reward);
-    
-    // 5. Logic Happiness
-    if (happiness < maxHappiness) {
-        const newHappiness = happiness + 1;
-        setHappiness(newHappiness);
-        if (newHappiness >= maxHappiness) {
-            handleClaimBigGift();
-        }
-    } 
-  };
-
-  const handleClaimBigGift = async () => {
-    // Tính toán Bonus: 100 Base + (Level Nhà * 20) + (Level Mind * 10)
-    const sanctuaryBonus = (userData?.sanctuary_level || 1) * 20;
-    const mindBonus = (userData?.energy_level || 1) * 10;
-    const bonusReward = 100 + sanctuaryBonus + mindBonus;
-    
-    // Cộng tiền
-    setCoins(prev => prev + bonusReward);
-    
-    // Reset Happiness
-    setHappiness(0);
-    
-    // Trigger Sleep
-    const wakeUpTime = Date.now() + (SLEEP_MINUTES * 60 * 1000);
-    setSleepUntil(wakeUpTime);
-    
-    // Haptic & Sound
-    webAppRef.current?.HapticFeedback.notificationOccurred('success');
-    // Có thể thêm sound khác đặc biệt hơn ở đây nếu muốn
-    playSuccess(); 
-
-    // ✅ HIỆN SỐ BONUS (Bay từ giữa màn hình dưới - vị trí thanh Happiness)
+    // Floating Text
     const textId = `${Date.now()}-${Math.random()}`;
-    const centerX = window.innerWidth / 2;
-    const bottomY = window.innerHeight - 150;
-
     setFloatingTexts(prev => [...prev, { 
-        id: textId, 
-        value: bonusReward, 
-        x: centerX, 
-        y: bottomY,
-        type: 'bonus'
+        id: textId, value: finalReward, x, y, type: hasWealthBuff ? 'bonus' : 'normal' 
     }]);
+    setTimeout(() => setFloatingTexts(prev => prev.filter(t => t.id !== textId)), 1000);
 
-    setTimeout(() => {
-        setFloatingTexts(prev => prev.filter(t => t.id !== textId));
-    }, 1500);
-
-    // Lưu DB
-    if(userData) {
-      unsavedCoinsRef.current = 0; 
-      // Gọi hàm RPC cũ, nhưng truyền số tiền Bonus mới
-      await supabase.rpc('claim_happiness_gift', { 
-        p_user_id: userData.id, 
-        p_reward: bonusReward,
-        p_sleep_minutes: SLEEP_MINUTES
-      });
+    // 4. Update Happiness
+    if (happiness < maxHappiness) {
+      const newHappiness = happiness + 1;
+      setHappiness(newHappiness);
+      if (newHappiness >= maxHappiness) {
+        handleClaimBigGift();
+      }
     }
   };
 
-  const handleUpgrade = async (type: 'click' | 'energy' | 'sanctuary', cost: number) => {
-    if(coins >= cost) {
+  const handlePopBubble = (id: number) => {
+    setBubbles(prev => prev.filter(b => b.id !== id));
+    webAppRef.current?.HapticFeedback.impactOccurred('light');
+  };
+
+  // --- 5. SHOP HANDLERS ---
+
+  const handleShopAction = async (type: string, param: any) => {
+    // --- 1. XÁC ĐỊNH GIÁ TIỀN (COST) ---
+    let cost = 0;
+
+    if (type === 'buy_mystery_box') {
+        const quantity = param as number; // Ở đây param là số lượng (1 hoặc 10)
+        cost = quantity === 10 ? 5500 : 600 * quantity;
+    } else {
+        // Với Upgrade, Ticket, Coffee: param chính là giá tiền
+        cost = param as number;
+    }
+
+    // --- 2. KIỂM TRA SỐ DƯ (Chung cho tất cả) ---
+    if (coins < cost) {
+      webAppRef.current?.HapticFeedback.notificationOccurred('error');
+      return; // Dừng ngay nếu không đủ tiền
+    }
+
+    // --- 3. XỬ LÝ LOGIC THEO TỪNG LOẠI ---
+
+    // A. Common: Upgrade Stats / Sanctuary
+    if (['click', 'energy', 'sanctuary'].includes(type)) {
         playSuccess();
         setCoins(prev => prev - cost);
         setUserData(prev => {
-            if(!prev) return null;
+            if (!prev) return null;
             return {
                 ...prev,
                 click_level: type === 'click' ? prev.click_level + 1 : prev.click_level,
                 energy_level: type === 'energy' ? prev.energy_level + 1 : prev.energy_level,
                 sanctuary_level: type === 'sanctuary' ? (prev.sanctuary_level || 1) + 1 : (prev.sanctuary_level || 1)
-            }
+            };
         });
         webAppRef.current?.HapticFeedback.notificationOccurred('success');
 
-        if (type === 'sanctuary') {
-            await supabase.rpc('buy_sanctuary_upgrade', { p_user_id: userData?.id, p_cost: cost });
+        const rpcName = type === 'sanctuary' ? 'buy_sanctuary_upgrade' : 'buy_upgrade';
+        const params = type === 'sanctuary' ? { p_user_id: userData?.id, p_cost: cost } : { p_user_id: userData?.id, p_type: type };
+        await supabase.rpc(rpcName, params);
+        return;
+    }
+
+    // B. Consumables: Travel Ticket
+    if (type === 'buy_ticket') {
+        const { data } = await supabase.rpc('buy_ticket', { p_user_id: userData?.id });
+        if (data?.success) {
+            setCoins(prev => prev - cost);
+            setUserData(prev => prev ? ({ ...prev, ticket_count: prev.ticket_count + 1, tickets_bought_today: prev.tickets_bought_today + 1 }) : null);
+            showToast("+1 Ticket Purchased! 🎫");
+            playSuccess();
         } else {
-            await supabase.rpc('buy_upgrade', { p_user_id: userData?.id, p_type: type });
+            alert(data?.message || "Purchase failed");
         }
-    } else {
-        webAppRef.current?.HapticFeedback.notificationOccurred('error');
+        return;
+    }
+
+    // Consumables: Coffee
+    if (type === 'buy_coffee') {
+        const { data } = await supabase.rpc('buy_coffee', { p_user_id: userData?.id });
+        if (data?.success) {
+            setCoins(prev => prev - cost);
+            
+            // Logic cũ: handleWakeUp(); (Đã xóa)
+            
+            // Logic mới: Cộng vào kho
+            setUserData(prev => prev ? ({ 
+                ...prev, 
+                coffee_buy_count: prev.coffee_buy_count + 1,
+                inventory_coffee: prev.inventory_coffee + 1 
+            }) : null);
+            
+            setHasNewItems(true); 
+            playSuccess();
+            
+            // ✅ THAY ALERT BẰNG TOAST ĐẸP
+            showToast("Coffee added to Bag! 🎒"); 
+        }
+        return;
+    }
+
+    // D. Consumables: Mystery Box
+    if (type === 'buy_mystery_box') {
+        // Lưu ý: Đã check tiền ở bước 2 rồi, không cần check lại ở đây
+        const quantity = param; 
+        
+        // Gọi Server
+        const { data, error } = await supabase.rpc('buy_mystery_box', { 
+            p_user_id: userData?.id, 
+            p_quantity: quantity 
+        });
+
+        if (data && data.success) {
+            // Update UI
+            fetchData(userData!.telegram_id);
+            
+            // Hiển thị Modal
+            setRewardsData(data.rewards);
+            setRewardModalOpen(true);
+            setHasNewItems(true); // Bật chấm đỏ Inventory
+            playSuccess();
+        } else {
+            alert("Error buying box");
+        }
+        return;
     }
   };
 
-  const handleTabChange = (tab: string) => {
-    playUi();
-    setActiveTab(tab);
-    if (tab === 'shop') setIsShopOpen(true);
-    else setIsShopOpen(false);
-  };
-  
-  // DEV TOOLS: HACK COINS
+  // --- 6. EFFECTS (LIFECYCLE) ---
+
+  // Init Data
+  useEffect(() => {
+    const init = async () => {
+      try {
+        if (typeof window !== 'undefined') {
+            // MOCK FOR DEV
+            if (process.env.NODE_ENV === 'development') {
+                console.log("⚠️ Running in DEV mode");
+                const MY_TELEGRAM_ID = 2101221512; // Change this if needed
+                await fetchData(MY_TELEGRAM_ID);
+                return;
+            }
+
+            const WebApp = (await import('@twa-dev/sdk')).default;
+            webAppRef.current = WebApp;
+            if (WebApp.initDataUnsafe.user) {
+                WebApp.ready(); WebApp.expand(); WebApp.setHeaderColor('#1a1b26');
+                fetchData(WebApp.initDataUnsafe.user.id);
+            } else { setLoading(false); }
+        }
+      } catch (e) { console.error("Init Error", e); setLoading(false); }
+    };
+    init();
+  }, []);
+
+  // Digestion Loop (Passive Decay)
+  useEffect(() => {
+    const digestionLoop = setInterval(() => {
+        const now = Date.now();
+        const timePassed = now - lastDigestionTimeRef.current;
+        const rate = isSleeping ? DIGESTION_RATE_SLEEP_MS : DIGESTION_RATE_AWAKE_MS;
+
+        if (timePassed >= rate && happiness > 0) {
+            setHappiness(prev => Math.max(0, prev - 1));
+            lastDigestionTimeRef.current = now;
+            
+            // Auto wake up if slept enough
+            if (isSleeping && happiness <= 1) {
+                handleWakeUp();
+            }
+        }
+    }, 1000);
+    return () => clearInterval(digestionLoop);
+  }, [happiness, isSleeping]);
+
+  // Main Game Loop (Timer & Bubbles)
+  useEffect(() => {
+    const gameLoop = setInterval(() => {
+      const now = Date.now();
+      
+      // 1. Sleep Timer Logic
+      if (sleepUntil) {
+        const diff = sleepUntil - now;
+        if (diff <= 0) {
+          handleWakeUp();
+        } else {
+          const hours = Math.floor(diff / (1000 * 60 * 60));
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+          setTimeRemaining(`${hours > 0 ? hours + ':' : ''}${minutes < 10 ? '0' + minutes : minutes}:${seconds < 10 ? '0' + seconds : seconds}`);
+        }
+      }
+
+      // 2. Bubble Spawn Logic (Dynamic Cap)
+      if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
+        setBubbles(prev => {
+          if (isSleeping) return prev;
+          
+          const remainingHappinessSlots = maxHappiness - happiness;
+          const currentDynamicCap = Math.min(SCREEN_BUBBLE_LIMIT, remainingHappinessSlots + 1);
+          if (prev.length >= currentDynamicCap) return prev;
+          
+          // Random Position
+          const side = Math.floor(Math.random() * 3);
+          let spawnX, spawnY;
+          if (side === 0) { spawnX = 20 + Math.random() * 60; spawnY = 15 + Math.random() * 10; } // Top
+          else if (side === 1) { spawnX = 15 + Math.random() * 10; spawnY = 30 + Math.random() * 30; } // Left
+          else { spawnX = 75 + Math.random() * 10; spawnY = 30 + Math.random() * 30; } // Right
+
+          lastBubbleTimeRef.current = now;
+          return [...prev, { id: now, x: spawnX, y: spawnY }];
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(gameLoop);
+  }, [maxHappiness, happiness, sleepUntil, isSleeping]);
+
+  // BGM & Audio
+  useEffect(() => {
+    const handleInteract = () => { playBgm(); window.removeEventListener('click', handleInteract); };
+    window.addEventListener('click', handleInteract);
+    return () => window.removeEventListener('click', handleInteract);
+  }, [playBgm]);
+
+  useEffect(() => {
+    if (isSleeping) playPurr(); else stopPurr();
+    return () => stopPurr();
+  }, [isSleeping, playPurr, stopPurr]);
+
+  // Save on Hidden
+  useEffect(() => {
+    const handleVis = () => { if (document.visibilityState === 'hidden') saveProgress(); };
+    window.addEventListener('visibilitychange', handleVis);
+    return () => { window.removeEventListener('visibilitychange', handleVis); saveProgress(); };
+  }, [userData]);
+
+
+  // --- 7. DEV TOOLS ---
   const handleDevHack = async () => {
     if (!userData) return;
-    const CHEAT_AMOUNT = 1000000; 
-    setCoins(prev => prev + CHEAT_AMOUNT);
-    try {
-        await supabase.rpc('increment_coins', { p_user_id: userData.id, p_amount: CHEAT_AMOUNT });
-        playSuccess(); 
-    } catch (err) { console.error(err); }
+    setCoins(prev => prev + 1000000);
+    await supabase.rpc('increment_coins', { p_user_id: userData.id, p_amount: 1000000 });
+    playSuccess();
   };
-
-  // DEV TOOLS: RESET
   const handleDevReset = async () => {
-    if (!userData) return;
-    if (!confirm("⚠️ CẢNH BÁO: Reset toàn bộ?")) return;
-    stopPurr(); 
-    setCoins(0); setHappiness(0); setSleepUntil(null); setTimeRemaining(""); setActiveTab('home');
+    if (!userData || !confirm("Reset All?")) return;
+    stopPurr(); setCoins(0); setHappiness(0); setSleepUntil(null); setTimeRemaining(""); setActiveTab('home');
     setUserData(prev => prev ? ({ ...prev, coins: 0, click_level: 1, energy_level: 1, sanctuary_level: 1, sleep_until: null }) : null);
-    try {
-        await supabase.rpc('reset_user_account', { p_user_id: userData.id });
-        playSuccess(); 
-    } catch (err: any) { alert(`Lỗi Reset: ${err.message}`); }
+    await supabase.rpc('reset_user_account', { p_user_id: userData.id });
+    playSuccess();
   };
 
+  const handleTabChange = (tab: string) => {
+    playUi(); 
+    setActiveTab(tab);
+    if (tab === 'inventory') setHasNewItems(false);
+    setIsShopOpen(tab === 'shop');
+  };
+
+  // --- 8. RENDER ---
   return (
     <div className="relative min-h-screen bg-game-bg text-game-text overflow-hidden font-sans select-none touch-none">
       <AssetPreloader />
       <ClickEffects clicks={clicks} />
       <FloatingNumbers texts={floatingTexts} />
+      <Toast 
+        isVisible={toast.show} 
+        message={toast.msg} 
+        type={toast.type} 
+        onClose={() => setToast(prev => ({ ...prev, show: false }))} 
+      />
       {/* HEADER */}
       <header className="absolute top-0 w-full p-6 flex justify-between z-40 pointer-events-none">
          <div className="flex flex-col gap-1 pointer-events-auto">
@@ -371,6 +501,36 @@ export default function GameClient() {
          </button>
       </header>
 
+      {/* ACTIVE BUFFS INDICATOR */}
+      <div className="absolute top-24 left-6 flex flex-col gap-2 z-30 pointer-events-none">
+        {(userData?.buff_wealth || 0) > 0 && (
+            <div className="bg-black/60 backdrop-blur-md pl-1 pr-3 py-1 rounded-full border border-yellow-500/30 flex items-center gap-2 animate-pulse-slow shadow-lg">
+                {/* Ảnh Potion nhỏ */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/assets/shop/reward-wealth.webp" alt="Wealth" className="w-8 h-8 object-contain drop-shadow-sm" />
+                
+                <div className="flex flex-col leading-none">
+                    <span className="text-yellow-300 font-bold text-xs">x2 Coins</span>
+                    <span className="text-[10px] text-slate-300">({userData?.buff_wealth} left)</span>
+                </div>
+            </div>
+        )}
+
+        {/* LUCK BUFF */}
+        {(userData?.buff_luck || 0) > 0 && (
+            <div className="bg-black/60 backdrop-blur-md pl-1 pr-3 py-1 rounded-full border border-green-500/30 flex items-center gap-2 animate-pulse-slow shadow-lg">
+                {/* Ảnh Potion nhỏ */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/assets/shop/reward-luck.webp" alt="Luck" className="w-8 h-8 object-contain drop-shadow-sm" />
+                
+                <div className="flex flex-col leading-none">
+                    <span className="text-green-300 font-bold text-xs">Lucky</span>
+                    <span className="text-[10px] text-slate-300">({userData?.buff_luck} left)</span>
+                </div>
+            </div>
+        )}
+      </div>
+
       {/* MAIN SCENE */}
       <main className="relative z-10 w-full h-screen pt-10">
         {activeTab === 'home' && (
@@ -382,13 +542,23 @@ export default function GameClient() {
              onInteractSuccess={handleInteractSuccess}
            />
         )}
-        {activeTab === 'travel' && <div className="flex items-center justify-center h-full text-white/50">Travel Coming Soon</div>}
+        {/* ✅ NEW: Tab Inventory */}
+        {activeTab === 'inventory' && userData && (
+           <InventoryView 
+              ticketCount={userData.ticket_count}
+              coffeeCount={userData.inventory_coffee}
+              buffWealth={userData.buff_wealth}
+              buffLuck={userData.buff_luck}
+              isSleeping={isSleeping}
+              onUseCoffee={handleUseInventoryCoffee}
+           />
+        )}
         {activeTab === 'profile' && <div className="flex items-center justify-center h-full text-white/50">Profile Coming Soon</div>}
       </main>
 
       {/* HAPPINESS BAR */}
       <div className="fixed bottom-28 left-6 right-6 z-30 pointer-events-none flex justify-center">
-        <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: isSleeping ? 1 : 1 }}>
+        <div className="relative w-full max-w-sm transition-all duration-500" style={{ opacity: 1 }}>
             <div className="absolute -left-1 -top-4 w-14 h-14 z-20 drop-shadow-[0_4px_8px_rgba(244,114,182,0.5)]">
                  <Image src="/assets/icons/heart-3d.webp" alt="Happiness" fill className={`object-contain transition-transform ${isSleeping ? 'grayscale scale-90' : ''}`} />
             </div>
@@ -411,15 +581,23 @@ export default function GameClient() {
        clickLevel={userData?.click_level || 1} 
        energyLevel={userData?.energy_level || 1} 
        sanctuaryLevel={userData?.sanctuary_level || 1}
-       onUpgrade={handleUpgrade} />
-      
-      <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
+       ticketsBought={userData?.tickets_bought_today || 0}
+       coffeeBuyCount={userData?.coffee_buy_count || 0}
+       isSleeping={isSleeping}
+       onUpgrade={handleShopAction} 
+       />
+      <RewardModal 
+          isOpen={rewardModalOpen} 
+          rewards={rewardsData} 
+          onClose={() => setRewardModalOpen(false)} 
+      />
+      <Navigation activeTab={activeTab} onTabChange={handleTabChange} hasNotification={hasNewItems} />
 
       {/* DEV BUTTONS */}
       {process.env.NODE_ENV === 'development' && (
         <div className="fixed bottom-24 right-4 z-[9999] flex flex-col gap-2 items-end">
-            <button onClick={handleDevHack} className="cursor-pointer bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg border-2 border-white/20 active:scale-90 hover:bg-red-500 transition-all">🐞 +1M Coins</button>
-            <button onClick={handleDevReset} className="cursor-pointer bg-slate-600 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg border-2 border-white/20 active:scale-90 hover:bg-slate-500 transition-all">🔄 Reset All</button>
+            <button onClick={handleDevHack} className="cursor-pointer bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg border-2 border-white/20 active:scale-90">🐞 +1M Coins</button>
+            <button onClick={handleDevReset} className="cursor-pointer bg-slate-600 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg border-2 border-white/20 active:scale-90">🔄 Reset All</button>
         </div>
       )}
       

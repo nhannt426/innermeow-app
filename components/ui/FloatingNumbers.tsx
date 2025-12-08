@@ -43,17 +43,28 @@ export default function FloatingNumbers({ texts }: { texts: FloatingText[] }) {
                   {/* TEXT BONUS (Tím/Hồng + Icon) */}
                   {isBonus && (
                     <>
-                        <span className="absolute top-1 left-1 text-5xl font-black text-[#4c1d95] select-none blur-[1px]">🎁 +{text.value}</span>
-                        <span 
-                            className="relative text-5xl font-black text-transparent bg-clip-text bg-gradient-to-b from-fuchsia-300 to-purple-500 select-none" 
-                            style={{ 
-                                textShadow: '0 4px 0 #4c1d95', 
-                                WebkitTextStroke: '1.5px #fff',
-                                filter: 'drop-shadow(0 0 10px rgba(192,38,211,0.6))' // Glow effect
-                            }}
-                        >
-                           🎁 +{text.value}
-                        </span>
+                        {/* Ảnh Ngôi Sao 3D (Thay cho Emoji 🎁) */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img 
+                            src="/assets/icons/star-3d.webp" 
+                            alt="Bonus" 
+                            className="w-12 h-12 object-contain drop-shadow-md animate-spin-slow" // Thêm xoay nhẹ nếu muốn
+                        />
+
+                        {/* Text Gradient Tím */}
+                        <div className="relative">
+                            <span className="absolute top-1 left-1 text-5xl font-black text-[#4c1d95] blur-[1px]">+{text.value}</span>
+                            <span 
+                                className="relative text-5xl font-black text-transparent bg-clip-text bg-gradient-to-b from-fuchsia-300 to-purple-500" 
+                                style={{ 
+                                    textShadow: '0 4px 0 #4c1d95', 
+                                    WebkitTextStroke: '1.5px #fff',
+                                    filter: 'drop-shadow(0 0 10px rgba(192,38,211,0.6))'
+                                }}
+                            >
+                               +{text.value}
+                            </span>
+                        </div>
                     </>
                   )}
               </div>
