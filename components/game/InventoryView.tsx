@@ -1,25 +1,59 @@
 'use client';
 
+import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react'; // Thêm icon đóng
 import { useGameSound } from '@/hooks/useGameSound';
+import { useGameStore } from '@/store/useGameStore';
+import { ITEM_DATA, ItemData } from '@/constants/itemData';
+import { ALL_DECOR_ITEMS, DecorItem as DecorItemData, DecorType } from '@/constants/decorItems';
 
 interface InventoryProps {
     isOpen: boolean; // ✅ NEW: Nhận prop isOpen
-    onClose: () => void; // ✅ NEW: Hàm đóng
-    ticketCount: number;
-    coffeeCount: number;
-    buffWealth: number;
-    buffLuck: number;
-    isSleeping: boolean;
-    onUseCoffee: () => void;
+    onClose: () => void;
+    showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-export default function InventoryView({ 
-    isOpen, onClose, // Nhớ destructure
-    ticketCount, coffeeCount, buffWealth, buffLuck, isSleeping, onUseCoffee 
-}: InventoryProps) {
+export default function InventoryView({ isOpen, onClose, showToast }: InventoryProps) {
   const { playUi } = useGameSound();
+
+  // Lấy state và actions từ store (Tách lẻ để tránh re-render loop)
+  const inventory = useGameStore(state => state.inventory);
+  const equippedDecor = useGameStore(state => state.equippedDecor);
+  const catAction = useGameStore(state => state.catAction);
+
+  // Lấy actions tĩnh, không gây re-render
+  const { setEquippedDecor, useCoffee: storeUseCoffee } = useGameStore.getState();
+
+  const isSleeping = catAction === 'SLEEP';
+
+  // ✅ 1. LOGIC LẤY ITEM SỞ HỮU
+  const ownedDecorItems = useMemo(() =>
+    ALL_DECOR_ITEMS.filter(item => (inventory[item.id] || 0) > 0),
+    [inventory]
+  );
+
+  const ownedConsumableItems = useMemo(() =>
+    Object.keys(inventory)
+      .map(id => ITEM_DATA[id])
+      .filter(itemData => itemData && inventory[itemData.id] > 0 && itemData.category === 'consumable'),
+    [inventory]
+  );
+  const isBagEmpty = ownedDecorItems.length === 0 && ownedConsumableItems.length === 0;
+
+  // ✅ 2. LOGIC XỬ LÝ (Handle Action)
+  const handleEquip = (item: DecorItemData) => {
+    playUi();
+    const itemIdWithoutPrefix = item.id.replace(`${item.type}_`, '');
+    setEquippedDecor(item.type, itemIdWithoutPrefix);
+    showToast(`Equipped ${item.name}! ✨`);
+  };
+
+  const handleUnequip = (item: DecorItemData) => {
+    playUi();
+    setEquippedDecor(item.type, null);
+    showToast(`Unequipped ${item.name}.`);
+  };
 
   return (
     <AnimatePresence>
@@ -54,114 +88,140 @@ export default function InventoryView({
             </div>
 
             {/* Scrollable Content */}
-            <div className="space-y-6 overflow-y-auto pb-24 pr-2 flex-1">
-                
-                {/* SECTION 1: CONSUMABLES */}
-                <div>
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Consumables</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                        
-                        {/* 1. TRAVEL TICKET */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 relative overflow-hidden">
-                            <div className="w-14 h-14 flex items-center justify-center drop-shadow-lg">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src="/assets/shop/shop-ticket.webp" alt="Ticket" className="w-full h-full object-contain" />
-                            </div>
-                            <span className="text-2xl font-black text-white">{ticketCount}</span>
-                            <span className="text-xs text-slate-400 font-bold">Travel Tickets</span>
-                            <button disabled className="w-full py-1.5 bg-white/5 text-white/30 text-[10px] font-bold rounded-lg mt-1 cursor-not-allowed">
-                                Use in Travel Tab
-                            </button>
-                        </div>
-
-                        {/* 2. INSTANT COFFEE */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 relative overflow-hidden">
-                            <div className="w-14 h-14 flex items-center justify-center drop-shadow-lg">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src="/assets/shop/shop-coffee.webp" alt="Coffee" className="w-full h-full object-contain" />
-                            </div>
-
-                            <span className="text-2xl font-black text-white">{coffeeCount}</span>
-                            <span className="text-xs text-slate-400 font-bold">Strong Coffee</span>
-                            
-                            {coffeeCount > 0 ? (
-                                <button 
-                                    onClick={onUseCoffee}
-                                    disabled={!isSleeping}
-                                    className={`w-full py-1.5 text-[10px] font-bold rounded-lg mt-1 transition-all ${
-                                        isSleeping 
-                                        ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20' 
-                                        : 'bg-white/5 text-white/30 cursor-not-allowed'
-                                    }`}
-                                >
-                                    {isSleeping ? "WAKE UP CAT!" : "Cat is Awake"}
-                                </button>
-                            ) : (
-                                <button className="w-full py-1.5 bg-white/5 text-white/30 text-[10px] font-bold rounded-lg mt-1">
-                                    Out of stock
-                                </button>
-                            )}
-                        </div>
-                    </div>
+            <div className="overflow-y-auto pb-24 pr-2 flex-1">
+              {isBagEmpty ? (
+                // ✅ 4. XỬ LÝ EMPTY STATE
+                <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
+                  <p className="text-lg font-bold">Your backpack is empty.</p>
+                  <p className="text-sm">Go to the shop to get some items!</p>
                 </div>
-
-                {/* SECTION 2: ACTIVE BUFFS */}
-                <div>
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Active Buffs</h3>
-                    {buffWealth === 0 && buffLuck === 0 && (
-                        <div className="text-center p-6 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                            <p className="text-sm text-slate-500">No active buffs. Buy Mystery Box to get some!</p>
-                        </div>
-                    )}
-
-                    <div className="space-y-3">
-                        {/* WEALTH BUFF */}
-                        {buffWealth > 0 && (
-                            <motion.div 
-                                initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-                                className="bg-gradient-to-r from-yellow-900/40 to-black/40 border border-yellow-500/30 p-3 rounded-2xl flex items-center gap-4"
-                            >
-                                <div className="w-12 h-12 flex items-center justify-center drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] animate-pulse-slow">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src="/assets/shop/reward-wealth.webp" alt="Wealth" className="w-full h-full object-contain" />
-                                </div>
-                                <div className="flex-1">
-                                    <h4 className="font-bold text-yellow-100">Wealth Potion</h4>
-                                    <p className="text-xs text-yellow-500/80">x2 Coins earned</p>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-2xl font-black text-white">{buffWealth}</span>
-                                    <span className="text-[10px] block text-slate-400 uppercase">Charges</span>
-                                </div>
-                            </motion.div>
-                        )}
-
-                        {/* LUCK BUFF */}
-                        {buffLuck > 0 && (
-                            <motion.div 
-                                initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-                                className="bg-gradient-to-r from-green-900/40 to-black/40 border border-green-500/30 p-3 rounded-2xl flex items-center gap-4"
-                            >
-                                <div className="w-12 h-12 flex items-center justify-center drop-shadow-[0_0_10px_rgba(34,197,94,0.5)] animate-pulse-slow">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src="/assets/shop/reward-luck.webp" alt="Luck" className="w-full h-full object-contain" />
-                                </div>
-                                <div className="flex-1">
-                                    <h4 className="font-bold text-green-100">Lucky Potion</h4>
-                                    <p className="text-xs text-green-500/80">High chance for Rare items</p>
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-2xl font-black text-white">{buffLuck}</span>
-                                    <span className="text-[10px] block text-slate-400 uppercase">Charges</span>
-                                </div>
-                            </motion.div>
-                        )}
-                    </div>
+              ) : (
+                <div className="space-y-8">
+                  {/* Section Decor */}
+                  <DecorSection
+                    items={ownedDecorItems}
+                    equippedItems={equippedDecor}
+                    onEquip={handleEquip}
+                    onUnequip={handleUnequip}
+                  />
+                  {/* Section Consumables */}
+                  <ConsumableSection
+                    items={ownedConsumableItems}
+                    inventory={inventory}
+                    onItemClick={(item) => {
+                      if (item.id === 'coffee' && isSleeping) {
+                        playUi();
+                        storeUseCoffee();
+                      }
+                    }}
+                  />
                 </div>
+              )}
             </div>
           </motion.div>
         </>
       )}
     </AnimatePresence>
+  );
+}
+interface DecorSectionProps {
+  items: DecorItemData[];
+  equippedItems: Record<DecorType, string | null>;
+  onEquip: (item: DecorItemData) => void;
+  onUnequip: (item: DecorItemData) => void;
+}
+
+function DecorSection({ items, equippedItems, onEquip, onUnequip }: DecorSectionProps) {
+
+  if (items.length === 0) {
+    return null; // Ẩn section nếu không có item
+  }
+
+  return (
+    <div>
+      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Decorations</h3>
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
+        {items.map(item => {
+          // ✅ 2. LOGIC KIỂM TRA "ĐANG TRANG BỊ"
+          const itemIdWithoutPrefix = item.id.replace(`${item.type}_`, '');
+          const isEquipped = equippedItems[item.type] === itemIdWithoutPrefix; // Sửa logic check
+          
+          return (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => !isEquipped && onEquip(item)}
+              className={`relative aspect-square bg-white/5 border rounded-2xl p-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-all
+                ${isEquipped ? 'border-game-primary shadow-lg shadow-game-primary/20' : 'border-white/10 cursor-pointer'}
+              `}
+            >
+              <div className="w-12 h-12 flex-grow flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={item.image} alt={item.name} className="max-w-full max-h-full object-contain drop-shadow-lg" />
+              </div>
+              <span className="text-[10px] text-white font-bold text-center leading-tight">{item.name}</span>
+              
+              {/* ✅ 1. SỬA UI THẺ ITEM: Nút Unequip */}
+              {isEquipped && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation(); // Ngăn event click của thẻ cha
+                    onUnequip(item);
+                  }}
+                  className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-[85%] bg-slate-700/80 hover:bg-red-500/80 backdrop-blur-sm text-white text-[10px] font-bold py-1 rounded-md transition-all"
+                >
+                  Unequip
+                </button>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+interface ConsumableSectionProps {
+  items: ItemData[];
+  inventory: Record<string, number>;
+  onItemClick: (item: ItemData) => void;
+}
+
+function ConsumableSection({ items, inventory, onItemClick }: ConsumableSectionProps) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Consumables</h3>
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
+        {items.map(item => {
+          const quantity = inventory[item.id];
+
+          return (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => onItemClick(item)}
+              className="relative aspect-square bg-white/5 border border-white/10 rounded-2xl p-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-all"
+            >
+              <div className="w-12 h-12 flex-grow flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={item.imgSrc} alt={item.name} className="max-w-full max-h-full object-contain drop-shadow-lg" />
+              </div>
+              <span className="text-[10px] text-white font-bold text-center leading-tight">{item.name}</span>
+              <div className="absolute bottom-1 right-2 text-sm font-black text-white/20">x{quantity}</div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

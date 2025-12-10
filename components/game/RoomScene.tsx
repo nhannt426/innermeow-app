@@ -1,87 +1,89 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import Image from 'next/image'; // Giữ lại cho Background và Mèo (Tĩnh)
-import { useState, useRef } from 'react';
-import { GameItem, getRandomItem } from '@/lib/game-config'; 
+import Image from 'next/image';
+import { useState, useRef, useEffect } from 'react';
 import { useGameSound } from '@/hooks/useGameSound';
+import CatController from './CatController';
+import DecorLayer from '@/components/game/DecorLayer'; // Import component DecorLayer mới
+import FloatingBubble from './FloatingBubble'; // ✅ Import component mới
+import { useGameStore } from '@/store/useGameStore'; // Import useGameStore
+
+// --- CONFIGURATION ---
+const BUBBLE_GEN_RATE_MS = 3000;
+const SCREEN_BUBBLE_LIMIT = 6;
 
 interface RoomSceneProps {
-  userLevel: number;
-  sanctuaryLevel: number;
-  // UPDATE: Thêm x, y vào callback
-  onInteractSuccess: (reward: number, type: string, x: number, y: number) => void;
-  bubbles: { id: number; x: number; y: number }[];
-  onPopBubble: (id: number) => void;
+  onInteractSuccess?: (reward: number, type: string, x: number, y: number) => void;
 }
 
-interface DroppedItem extends GameItem {
-  instanceId: number;
-  x: number;
-  y: number;
-}
+export default function RoomScene({ onInteractSuccess }: RoomSceneProps) {
+  // Lấy từng state nguyên thủy để tránh re-render loop
+  const sanctuary_level = useGameStore((state) => state.sanctuary_level);
+  const happiness = useGameStore((state) => state.happiness);
+  const userData = useGameStore((state) => state.userData);
+  const catAction = useGameStore((state) => state.catAction);
+  
+  // Tính toán các giá trị dẫn xuất từ state
+  const maxHappiness = userData ? 10 + userData.energy_level : 10;
+  const isSleeping = catAction === 'SLEEP';
 
-export default function RoomScene({ userLevel, sanctuaryLevel, onInteractSuccess, bubbles, onPopBubble }: RoomSceneProps) {
-  const [droppedItems, setDroppedItems] = useState<DroppedItem[]>([]);
+  // Component tự quản lý state bong bóng
+  const [bubbles, setBubbles] = useState<{ id: number; x: number; y: number }[]>([]);
+  const lastBubbleTimeRef = useRef<number>(Date.now());
+  
   const catRef = useRef<HTMLDivElement>(null);
-  const { playPop, playDrop } = useGameSound();
-  const bgImageSrc = `/assets/backgrounds/bg-level-${sanctuaryLevel}.webp`;
+  const { playPop } = useGameSound();
+  const bgImageSrc = `/assets/rooms/bg_lv${sanctuary_level}.webp`;
 
-  const handleBubbleClick = (id: number, x: number, y: number) => {
-    playPop();
-    onPopBubble(id);
-    const itemConfig = getRandomItem(userLevel);
-    
-    // Random nhẹ vị trí rơi xung quanh bong bóng vỡ cho tự nhiên
-    const dropOffsetX = (Math.random() - 0.5) * 5; 
-    setTimeout(() => playDrop(), 300);
-    const newItem: DroppedItem = {
-      ...itemConfig,
-      instanceId: Date.now(),
-      x: x + dropOffsetX, 
-      y: y
-    };
-    setDroppedItems(prev => [...prev, newItem]);
-  };
+  // Game loop cục bộ chỉ để sinh bong bóng
+  useEffect(() => {
+    const bubbleLoop = setInterval(() => {
+      const now = Date.now();
+      if (now - lastBubbleTimeRef.current > BUBBLE_GEN_RATE_MS) {
+        setBubbles(prev => {
+          if (isSleeping) return prev;
+          
+          const remainingHappinessSlots = maxHappiness - happiness;
+          const currentDynamicCap = Math.min(SCREEN_BUBBLE_LIMIT, remainingHappinessSlots + 1);
+          if (prev.length >= currentDynamicCap) return prev;
+          
+          const side = Math.floor(Math.random() * 3);
+          let spawnX, spawnY;
+          if (side === 0) { spawnX = 20 + Math.random() * 60; spawnY = 15 + Math.random() * 10; } // Top
+          else if (side === 1) { spawnX = 15 + Math.random() * 10; spawnY = 30 + Math.random() * 30; } // Left
+          else { spawnX = 75 + Math.random() * 10; spawnY = 30 + Math.random() * 30; } // Right
 
-  const handleDragEnd = (event: any, info: any, item: DroppedItem) => {
-    const catRect = catRef.current?.getBoundingClientRect();
-    
-    // Lấy tọa độ thả chuột thực tế từ event
-    // clientX/Y là vị trí ngón tay/chuột trên màn hình
-    const dropX = event.clientX || info.point.x; 
-    const dropY = event.clientY || info.point.y;
-
-    if (catRect) {
-      if (
-        dropX >= catRect.left - 30 && 
-        dropX <= catRect.right + 30 && 
-        dropY >= catRect.top - 30 && 
-        dropY <= catRect.bottom + 30
-      ) {       
-        // UPDATE: Truyền tọa độ dropX, dropY lên trên
-        handleItemConsumed(item, dropX, dropY);
+          lastBubbleTimeRef.current = now;
+          return [...prev, { id: now, x: spawnX, y: spawnY }];
+        });
       }
-    }
-  };
+    }, 1000);
 
-  const handleItemConsumed = (item: DroppedItem, x: number, y: number) => {
-    setDroppedItems(prev => prev.filter(i => i.instanceId !== item.instanceId));
-    onInteractSuccess(item.reward, item.type, x, y);
+    return () => clearInterval(bubbleLoop);
+  }, [maxHappiness, happiness, isSleeping]);
+
+  // Xử lý khi người dùng click vào bong bóng
+  const handleBubbleClick = (bubble: { id: number; x: number; y: number }) => {
+    playPop();
+    setBubbles(prev => prev.filter(b => b.id !== bubble.id));
+    if (onInteractSuccess) {
+      const baseReward = Math.floor(Math.random() * (20 - 5 + 1)) + 5;
+      onInteractSuccess(baseReward, 'coin', bubble.x, bubble.y);
+    }
   };
 
   return (
     <div className="relative w-full h-[65vh] mt-6 flex items-center justify-center select-none touch-none">
       
-      {/* Background (Dùng Next Image ok vì nó tĩnh) */}
+      {/* LAYER 0: Background Image */}
       <motion.div 
         // Thêm key để React biết phải render lại khi đổi ảnh (tạo hiệu ứng chuyển cảnh mượt nếu muốn)
-        key={sanctuaryLevel} 
+        key={sanctuary_level} 
         initial={{ opacity: 0 }}
-        animate={{ y: [0, -10, 0], opacity: 1 }}
+        animate={{ opacity: 1 }}
         transition={{ 
-            y: { duration: 6, repeat: Infinity, ease: "easeInOut" },
-            opacity: { duration: 1 } // Fade in khi đổi nhà
+            opacity: { duration: 1 }
         }}
         className="relative w-[360px] h-[360px] flex items-center justify-center pointer-events-none"
       >
@@ -90,91 +92,35 @@ export default function RoomScene({ userLevel, sanctuaryLevel, onInteractSuccess
         {/* Dùng biến bgImageSrc */}
         <Image 
             src={bgImageSrc} 
-            alt={`Sanctuary Level ${sanctuaryLevel}`} 
+            alt={`Sanctuary Level ${sanctuary_level}`} 
             width={380} 
             height={380} 
             className="object-contain drop-shadow-2xl z-0" 
             priority 
         />
       </motion.div>
+      
+      {/* LAYER 0.5: Decor Tường */}
+      <DecorLayer layer="wall" />
 
-      {/* Cat (Drop Zone) */}
-      <motion.div
-        ref={catRef}
-        className="absolute z-10 mb-[-30px]"
-        animate={{ y: [0, -5, 0] }}
-        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <Image src="/assets/cat-idle.webp" alt="Cat" width={170} height={170} className="object-contain drop-shadow-xl pointer-events-none" />
-      </motion.div>
+      {/* LAYER 1: Decor Sàn (Thảm) */}
+      <DecorLayer layer="rug" />
 
-      {/* Dropped Items (Dùng <img> thường để KHÔNG LAG) */}
-      <AnimatePresence>
-        {droppedItems.map((item) => (
-          <DraggableItem key={item.instanceId} item={item} onDragEnd={handleDragEnd} />
-        ))}
-      </AnimatePresence>
+      {/* LAYER 2: Cat Controller */}
+      <CatController ref={catRef} />
+
+      {/* LAYER 3: Decor Nội thất (Giường, Bát, Cây, Đồ chơi) */}
+      <DecorLayer layer="bed" />
+      <DecorLayer layer="bowl" />
+      <DecorLayer layer="plant" />
+      <DecorLayer layer="toy" />
 
       {/* Floating Bubbles */}
       <AnimatePresence>
         {bubbles.map((b) => (
-          <FloatingBubble key={b.id} x={b.x} y={b.y} onClick={() => handleBubbleClick(b.id, b.x, b.y)} />
+          <FloatingBubble key={b.id} x={b.x} y={b.y} onClick={() => handleBubbleClick(b)} />
         ))}
       </AnimatePresence>
     </div>
   );
-}
-
-function DraggableItem({ item, onDragEnd }: { item: DroppedItem, onDragEnd: any }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0, y: -50 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.5 }}
-      drag
-      dragMomentum={false}
-      whileDrag={{ scale: 1.2, cursor: 'grabbing', zIndex: 100 }}
-      onDragEnd={(e, info) => onDragEnd(e, info, item)}
-      className="absolute z-20 cursor-grab touch-action-none"
-      style={{ top: `${item.y}%`, left: `${item.x}%` }}
-    >
-      <div className="w-16 h-16 drop-shadow-lg filter hover:brightness-110">
-         {/* FIX QUAN TRỌNG: Dùng thẻ img thường để load tức thì từ cache */}
-         {/* eslint-disable-next-line @next/next/no-img-element */}
-         <img 
-            src={item.src} 
-            alt={item.name} 
-            className="w-full h-full object-contain pointer-events-none"
-            draggable={false} // Chặn drag mặc định của trình duyệt
-         />
-         
-         <div className="absolute -bottom-4 w-full text-center">
-             <span className="text-[9px] bg-black/50 text-white px-1.5 py-0.5 rounded-full backdrop-blur-sm whitespace-nowrap border border-white/10">
-                {item.name}
-             </span>
-         </div>
-      </div>
-    </motion.div>
-  )
-}
-
-function FloatingBubble({ x, y, onClick }: { x: number, y: number, onClick: () => void }) {
-  return (
-      <motion.button
-        initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 1.5, opacity: 0 }}
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
-        className="absolute z-30 w-20 h-20 touch-manipulation" 
-        style={{ 
-            left: `${x}%`, 
-            top: `${y}%`,
-            // FIX QUAN TRỌNG: Căn giữa tâm để không bị lệch
-            transform: 'translate(-50%, -50%)' 
-        }}
-      >
-        <div className="relative w-full h-full animate-float drop-shadow-[0_0_15px_rgba(45,212,191,0.5)]">
-             {/* eslint-disable-next-line @next/next/no-img-element */}
-             <img src="/assets/icons/bubble-3d.webp" alt="Bubble" className="w-full h-full object-contain" draggable={false} />
-        </div>
-      </motion.button>
-  )
 }

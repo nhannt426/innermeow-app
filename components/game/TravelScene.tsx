@@ -1,19 +1,22 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TRAVEL_MAPS } from '@/constants/travelData';
 import { ArrowLeft } from 'lucide-react';
 import { useGameSound } from '@/hooks/useGameSound';
+import FloatingBubble from './FloatingBubble'; // ✅ Import component FloatingBubble
+
+const SCREEN_BUBBLE_LIMIT = 5;
 
 interface TravelSceneProps {
   mapId: string;
-  bubbles: { id: number; x: number; y: number }[]; // Nhận bong bóng từ GameClient
-  onPopBubble: (id: number) => void;
+  onInteractSuccess: (reward: number, type: string, x: number, y: number) => void;
   onExit: () => void;
 }
 
-export default function TravelScene({ mapId, bubbles, onPopBubble, onExit }: TravelSceneProps) {
+export default function TravelScene({ mapId, onInteractSuccess, onExit }: TravelSceneProps) {
   const { playUi } = useGameSound();
+  const [bubbles, setBubbles] = useState<{ id: number; x: number; y: number }[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentMap = TRAVEL_MAPS.find(m => m.id === mapId);
 
@@ -34,6 +37,26 @@ export default function TravelScene({ mapId, bubbles, onPopBubble, onExit }: Tra
       audio.currentTime = 0;
     };
   }, [currentMap, mapId]);
+
+  // Game loop cục bộ để sinh bong bóng
+  useEffect(() => {
+    const bubbleLoop = setInterval(() => {
+      setBubbles(prev => {
+        if (prev.length >= SCREEN_BUBBLE_LIMIT) return prev;
+        const spawnX = 10 + Math.random() * 80;
+        const spawnY = 20 + Math.random() * 60;
+        return [...prev, { id: Date.now(), x: spawnX, y: spawnY }];
+      });
+    }, 2000); // Tần suất sinh bong bóng ở travel scene
+
+    return () => clearInterval(bubbleLoop);
+  }, []);
+
+  const handleBubbleClick = (bubble: { id: number; x: number; y: number }) => {
+    setBubbles(prev => prev.filter(b => b.id !== bubble.id));
+    // Gọi lên GameClient để xử lý logic rớt đồ
+    onInteractSuccess(0, 'travel_bubble', bubble.x, bubble.y);
+  };
 
   if (!currentMap) return null;
 
@@ -67,24 +90,11 @@ export default function TravelScene({ mapId, bubbles, onPopBubble, onExit }: Tra
         {/* 3. GAMEPLAY LAYER (Bong bóng) */}
         {/* Tái sử dụng logic render bong bóng nhưng ở bối cảnh mới */}
         {bubbles.map((bubble) => (
-            <div
-                key={bubble.id}
-                className="absolute w-20 h-20 cursor-pointer animate-float-fast hover:scale-110 active:scale-90 transition-transform touch-manipulation z-30"
-                style={{ left: `${bubble.x}%`, top: `${bubble.y}%` }}
-                onPointerDown={(e) => {
-                    e.preventDefault(); // Ngăn zoom/scroll
-                    onPopBubble(bubble.id);
-                }}
-            >
-                {/* Bong bóng Travel có thể khác bong bóng thường nếu muốn (ví dụ màu khác) */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                    src="/assets/bubble.webp" 
-                    alt="bubble" 
-                    className="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.6)]" 
-                    draggable={false}
-                />
-            </div>
+            <FloatingBubble
+              key={bubble.id}
+              x={bubble.x} y={bubble.y}
+              onClick={() => handleBubbleClick(bubble)}
+            />
         ))}
     </div>
   );
